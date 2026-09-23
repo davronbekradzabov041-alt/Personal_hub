@@ -1,0 +1,33 @@
+name: personal_hub
+description: >
+  Personal Hub — офлайн-приложение для Android (Flutter),
+  модульная архитектура. Ядро (core) не зависит от модулей.
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+
+  # --- Isar: локальная база данных ядра ---
+  isar: ^3.1.0+1
+  isar_flutter_libs: ^3.1.0+1
+  path_provider: ^2.1.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+  # --- Кодогенерация схем Isar ---
+  isar_generator: ^3.1.0+1
+  build_runner: ^2.4.9
+
+flutter:
+  uses-material-design: true
+  # assets:
+  #   - assets/

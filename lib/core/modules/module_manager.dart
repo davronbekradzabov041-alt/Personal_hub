@@ -1,0 +1,456 @@
+import 'package:flutter/foundation.dart';
+
+import 'external/manifest_validator.dart';
+import '../search/global_search_service.dart';
+import '../search/search_provider.dart';
+import 'module.dart';
+import 'module_api.dart';
+import 'module_install_result.dart';
+import 'module_lifecycle_error.dart';
+import 'module_manifest.dart';
+import 'module_permission.dart';
+import 'module_registry.dart';
+import 'module_state.dart';
+import 'module_storage.dart';
+import 'module_storage_isar.dart';
+
+/// Оркестратор жизненного цикла модулей.
+///
+/// Владеет состоянием (`ModuleState`) каждого модуля — сам `Module`
+/// о своём состоянии не знает (см. Этап 7). Работает поверх уже
+/// существующего `ModuleRegistry` (каталог того, чей код известен
+/// приложению) — не создаёт второй реестр, только добавляет слой
+/// состояния и проверок над ним.
+///
+/// `ChangeNotifier` — по аналогии с `AppSettingsController`
+/// (см. итоги аудита Этапа 6): это архитектурный ориентир, а не
+/// копирование кода. Подключён в main.dart/app.dart начиная с
+/// Этапа 10 (до Этапа 9 подключать было рано — не было персистентности,
+/// состояние сбрасывалось бы при каждом перезапуске).
+///
+/// Этап 13 (аудит безопасности) добавил: проверку apiVersion/формата
+/// версии/зависимостей/циклов при install, откат (rollback) при
+/// неудачном install/enable/disable, типизированный результат
+/// установки (ModuleInstallResult) — ничего из публичного контракта
+/// install/enable/disable/uninstall/update не удалено и не изменило
+/// сигнатуру, только добавлены новые проверки внутри и новый
+/// параллельный метод tryInstall().
+class ModuleManager extends ChangeNotifier {
+  ModuleManager({
+    required GlobalSearchService searchService,
+    ModuleStorage Function(String moduleId)? storageFactory,
+  })  : _searchService = searchService,
+        _storageFactory = storageFactory ?? ModuleStorageIsar.new;
+
+  final GlobalSearchService _searchService;
+
+  /// Фабрика хранилища модуля — по умолчанию настоящий Isar-backed
+  /// ModuleStorageIsar (Этап 9/10). Параметр — не смена архитектуры,
+  /// а то, что нужно, чтобы Этап 13 мог написать тест на rollback,
+  /// который реально проверяет, что частично записанные данные
+  /// стираются, не трогая настоящую базу (которой в этой среде и
+  /// быть не может — нет Flutter/Dart SDK для кодогенерации Isar).
+  final ModuleStorage Function(String moduleId) _storageFactory;
+
+  /// Состояние каждого модуля по его id. Отсутствие ключа means
+  /// «модуль никогда не устанавливался» — не то же самое, что
+  /// ModuleState.uninstalled (модуль был установлен и удалён).
+  final Map<String, ModuleState> _states = {};
+
+  /// Один ModuleApi (и одно хранилище) на модуль, переиспользуется
+  /// между вызовами хуков — иначе onInstall и onEnable одного модуля
+  /// видели бы разные объекты ModuleStorage.
+  final Map<String, ModuleApi> _apiCache = {};
+
+  // --- Наблюдение за состоянием (для будущего UI/тестов) ---
+
+  ModuleState? stateOf(String moduleId) => _states[moduleId];
+
+  bool isInstalled(String moduleId) {
+    final state = _states[moduleId];
+    return state != null && state != ModuleState.uninstalled;
+  }
+
+  bool isEnabled(String moduleId) => _states[moduleId] == ModuleState.enabled;
+
+  /// Снимок состояний всех модулей, когда-либо тронутых менеджером.
+  Map<String, ModuleState> get states => Map.unmodifiable(_states);
+
+  // --- Жизненный цикл ---
+
+  /// Обратно совместимая обёртка над tryInstall() — бросает
+  /// ModuleLifecycleError при отказе вместо возврата результата.
+  /// Существующие вызывающие (Этапы 8/10/12, ModuleStateRestorer,
+  /// builtin_module_installer) ловят именно это исключение — их
+  /// код на Этапе 13 не менялся ни строкой, только этот метод стал
+  /// тоньше и делегирует всю логику в tryInstall().
+  Future<void> install(String moduleId) async {
+    final result = await tryInstall(moduleId);
+    if (!result.isSuccess) {
+      throw ModuleLifecycleError(
+        moduleId,
+        result.violations.isEmpty
+            ? (result.reason ?? 'ошибка установки')
+            : '${result.reason}: ${result.violations.join("; ")}',
+      );
+    }
+  }
+
+  /// installed: модуль должен быть уже известен ModuleRegistry и ещё
+  /// не установлен. Возвращает типизированный результат вместо
+  /// исключения (Этап 13, п. 5 — "не использовать Exception там, где
+  /// нужен типизированный результат").
+  ///
+  /// Проверки, добавленные на Этапе 13 (ничего из этого не было на
+  /// Этапе 8): пустой id (defense-in-depth), формат версии,
+  /// совместимость apiVersion, невыполненные зависимости, циклы в
+  /// графе зависимостей. Если onInstall() модуля бросает исключение —
+  /// откат: состояние возвращается к тому, что было ДО попытки, а
+  /// хранилище модуля, если хук успел туда что-то записать, стирается.
+  Future<ModuleInstallResult> tryInstall(String moduleId) async {
+    final module = ModuleRegistry.get(moduleId);
+    if (module == null) {
+      return ModuleInstallResult.failure(
+        moduleId,
+        reason: 'модуль не зарегистрирован в ModuleRegistry',
+      );
+    }
+
+    if (module.id.trim().isEmpty) {
+      // Не должно случиться через ManifestParser (Этап 11), но
+      // Module можно создать и в обход парсера — defense-in-depth.
+      return ModuleInstallResult.failure(
+        moduleId,
+        reason: 'у модуля пустой id',
+      );
+    }
+
+    final priorState = _states[moduleId];
+    if (priorState != null && priorState != ModuleState.uninstalled) {
+      return ModuleInstallResult.failure(
+        moduleId,
+        reason: 'модуль уже установлен (текущее состояние: ${priorState.name})',
+      );
+    }
+
+    final violations = _validateForInstall(module);
+    if (violations.isNotEmpty) {
+      return ModuleInstallResult.failure(
+        moduleId,
+        reason: 'установка отклонена проверками безопасности',
+        violations: violations,
+      );
+    }
+
+    try {
+      await module.onInstall(_apiFor(module));
+    } catch (error) {
+      await _rollbackFailedInstall(moduleId, priorState);
+      return ModuleInstallResult.failure(
+        moduleId,
+        reason: 'onInstall завершился с ошибкой: $error',
+      );
+    }
+
+    _states[moduleId] = ModuleState.installed;
+    notifyListeners();
+    return ModuleInstallResult.success(moduleId);
+  }
+
+  /// enabled: модуль должен быть installed или disabled.
+  /// Нельзя включить то, что не установлено, — отдельная явная
+  /// проверка, как отдельно потребовано в задаче Этапа 8.
+  ///
+  /// Этап 13: если onEnable() бросает исключение (например,
+  /// registerSearchProvider() отказал из-за отсутствия разрешения —
+  /// это реальный, а не гипотетический путь, см. _ModuleApiImpl
+  /// ниже), состояние откатывается к тому, что было до вызова —
+  /// раньше оно оставалось "enabled" даже при упавшем хуке.
+  Future<void> enable(String moduleId) async {
+    final module = _requireRegistered(moduleId);
+    final priorState = _states[moduleId];
+
+    if (priorState == null || priorState == ModuleState.uninstalled) {
+      throw ModuleLifecycleError(
+        moduleId,
+        'нельзя включить неустановленный модуль — сначала install()',
+      );
+    }
+    if (priorState == ModuleState.enabled) {
+      throw ModuleLifecycleError(moduleId, 'модуль уже включён');
+    }
+
+    await module.onEnable(_apiFor(module));
+
+    _states[moduleId] = ModuleState.enabled;
+    notifyListeners();
+  }
+
+  /// disabled: модуль должен быть enabled.
+  /// Этап 13: та же перестановка порядка, что и в enable() — хук
+  /// вызывается ДО мутации состояния, а не после.
+  Future<void> disable(String moduleId) async {
+    final module = _requireRegistered(moduleId);
+    final priorState = _states[moduleId];
+
+    if (priorState != ModuleState.enabled) {
+      throw ModuleLifecycleError(
+        moduleId,
+        'нельзя выключить модуль в состоянии '
+        '${priorState?.name ?? "не установлен"} — модуль не включён',
+      );
+    }
+
+    await module.onDisable(_apiFor(module));
+
+    _states[moduleId] = ModuleState.disabled;
+    notifyListeners();
+  }
+
+  /// uninstalled: модуль должен быть installed или disabled.
+  /// Удаление включённого модуля запрещено напрямую — сначала
+  /// disable(), чтобы модуль гарантированно успел отписаться от
+  /// поиска и т.п. до того, как его пометят удалённым. Это и есть
+  /// «корректная последовательность жизненного цикла».
+  ///
+  /// Безопасное удаление (Этап 13, п. 4): хук вызывается первым (как
+  /// и раньше — здесь порядок уже был правильным), а persist-слой
+  /// (ModuleStatePersistence, Этап 9, подписан на notifyListeners()
+  /// и не менялся) стирает запись состояния И все key-value данные
+  /// модуля (ModuleDataRow, отфильтрованные по этому moduleId — ядро
+  /// и другие модули хранятся в других строках/коллекциях и не
+  /// затрагиваются никаким из этих вызовов).
+  Future<void> uninstall(String moduleId) async {
+    final module = _requireRegistered(moduleId);
+    final current = _states[moduleId];
+
+    if (current != ModuleState.installed && current != ModuleState.disabled) {
+      throw ModuleLifecycleError(
+        moduleId,
+        'нельзя удалить модуль в состоянии '
+        '${current?.name ?? "не установлен"} — если модуль включён, '
+        'сначала disable()',
+      );
+    }
+
+    await module.onUninstall(_apiFor(module));
+    _states[moduleId] = ModuleState.uninstalled;
+    _apiCache.remove(moduleId);
+    notifyListeners();
+
+    // Примечание: код модуля из ModuleRegistry НЕ убираем. Для
+    // встроенного модуля он всё равно скомпилирован в приложение —
+    // «удаление» здесь про состояние и данные, не про стирание кода.
+  }
+
+  /// Минимальное обновление: подменяет реализацию модуля в
+  /// ModuleRegistry той же id, не меняя текущее состояние
+  /// жизненного цикла (installed/enabled/disabled — как было).
+  ///
+  /// Это ровно то, для чего уже есть контракты: ModuleManifest.id
+  /// и .version — простые строки, сравнение — на равенство. Полноценной
+  /// системы обновлений здесь нет и не должно быть: нет semver-сравнения,
+  /// нет onUpdate-хука в Module (Этап 7 его не определял), нет миграции
+  /// сохранённых данных. Всё это — за пределами Этапа 8.
+  ///
+  /// Этап 13: если регистрация НОВОЙ версии почему-то отказывает
+  /// (например, id внезапно занят другим объектом), старая версия
+  /// возвращается в реестр — модуль не остаётся без зарегистрированного
+  /// кода вовсе.
+  Future<void> update(Module newVersion) async {
+    final moduleId = newVersion.id;
+    final current = _states[moduleId];
+
+    if (current == null || current == ModuleState.uninstalled) {
+      throw ModuleLifecycleError(
+        moduleId,
+        'нельзя обновить модуль, который не установлен',
+      );
+    }
+
+    final old = ModuleRegistry.get(moduleId);
+    if (old == null) {
+      // Не должно происходить, если состояние есть, но проверяем —
+      // рассинхронизация ModuleManager/ModuleRegistry это и есть один
+      // из случаев, которые должна ловить архитектура проверок.
+      throw ModuleLifecycleError(moduleId, 'модуль не найден в ModuleRegistry');
+    }
+    if (old.manifest.version == newVersion.manifest.version) {
+      throw ModuleLifecycleError(
+        moduleId,
+        'версия не изменилась (${old.manifest.version})',
+      );
+    }
+
+    ModuleRegistry.unregister(moduleId);
+    try {
+      ModuleRegistry.register(newVersion);
+    } catch (error) {
+      // Rollback: не оставляем модуль вообще без кода в реестре.
+      ModuleRegistry.register(old);
+      rethrow;
+    }
+    // Состояние (installed/enabled/disabled) намеренно сохраняется
+    // как было — update не должен незаметно "включать" или
+    // "выключать" модуль. Хуки onInstall/onEnable заново не зовутся.
+    notifyListeners();
+  }
+
+  // --- Внутренние проверки ---
+
+  Module _requireRegistered(String moduleId) {
+    final module = ModuleRegistry.get(moduleId);
+    if (module == null) {
+      throw ModuleLifecycleError(
+        moduleId,
+        'модуль не зарегистрирован в ModuleRegistry',
+      );
+    }
+    return module;
+  }
+
+  static final RegExp _versionPattern = RegExp(r'^\d+\.\d+\.\d+$');
+
+  /// Все проверки, которые должны провалить install() (Этап 13,
+  /// пп. 1–2). Возвращает список нарушений — специально не
+  /// останавливается на первом, чтобы вызывающий видел все проблемы
+  /// сразу (тот же принцип, что и в ManifestValidator, Этап 11).
+  List<String> _validateForInstall(Module module) {
+    final violations = <String>[];
+    final manifest = module.manifest;
+
+    if (!_versionPattern.hasMatch(manifest.version)) {
+      violations.add(
+        'неверный формат версии: "${manifest.version}" '
+        '(ожидается major.minor.patch, например 1.0.0)',
+      );
+    }
+
+    if (manifest.apiVersion < 1 || manifest.apiVersion > kCoreModuleApiVersion) {
+      violations.add(
+        'несовместимая версия Module API: ${manifest.apiVersion} '
+        '(ядро поддерживает версии 1..$kCoreModuleApiVersion)',
+      );
+    }
+
+    final missingDeps = manifest.dependencies
+        .where((dep) => !isEnabled(dep.moduleId))
+        .map((dep) => dep.moduleId)
+        .toList();
+    if (missingDeps.isNotEmpty) {
+      violations.add('не выполнены зависимости: ${missingDeps.join(", ")}');
+    }
+
+    final cycles = _dependencyCycles(module);
+    if (cycles.isNotEmpty) {
+      violations.add('циклические зависимости: ${cycles.join("; ")}');
+    }
+
+    return violations;
+  }
+
+  /// Строит граф зависимостей из ВСЕХ модулей, уже известных
+  /// ModuleRegistry, плюс проверяемый модуль, и ищет циклы через уже
+  /// существующий ManifestValidator.findDependencyCycles (Этап 11) —
+  /// не дублирует алгоритм поиска циклов, только строит граф для него.
+  ///
+  /// Практически сейчас граф всегда тривиален: ни один реальный
+  /// модуль в приложении не объявляет зависимостей. Проверка тем не
+  /// менее реальная, не заглушка — активируется, как только у
+  /// какого-нибудь модуля появятся dependencies (тест использует
+  /// синтетические модули именно для этого).
+  List<String> _dependencyCycles(Module module) {
+    final graph = <String, List<String>>{
+      for (final m in ModuleRegistry.modules)
+        m.id: m.manifest.dependencies.map((d) => d.moduleId).toList(),
+    };
+    graph[module.id] = module.manifest.dependencies.map((d) => d.moduleId).toList();
+
+    return ManifestValidator().findDependencyCycles(graph);
+  }
+
+  /// Rollback неудачного install() (Этап 13, п. 3): состояние
+  /// возвращается к тому, что было ДО попытки (null или uninstalled —
+  /// install() допускает только эти два варианта на входе), а всё,
+  /// что onInstall() успел записать в своё хранилище до того, как
+  /// упасть, стирается — не оставляем частично установленный модуль.
+  Future<void> _rollbackFailedInstall(
+    String moduleId,
+    ModuleState? priorState,
+  ) async {
+    if (priorState == null) {
+      _states.remove(moduleId);
+    } else {
+      _states[moduleId] = priorState;
+    }
+
+    final api = _apiCache.remove(moduleId);
+    if (api != null) {
+      for (final key in await api.storage.keys()) {
+        await api.storage.remove(key);
+      }
+    }
+  }
+
+  /// Публичный доступ к ModuleApi модуля — нужен странице самого
+  /// модуля (Этап 10), чтобы читать/писать свои настройки через
+  /// ModuleApi.storage, не имея собственной ссылки на ModuleManager
+  /// внутри buildPage(). Тот же кэшированный экземпляр, что получают
+  /// lifecycle-хуки — не новый объект на каждый вызов.
+  ModuleApi apiFor(String moduleId) {
+    final module = _requireRegistered(moduleId);
+    return _apiFor(module);
+  }
+
+  ModuleApi _apiFor(Module module) {
+    return _apiCache.putIfAbsent(
+      module.id,
+      () => _ModuleApiImpl(
+        module: module,
+        storage: _storageFactory(module.id),
+        searchService: _searchService,
+      ),
+    );
+  }
+}
+
+/// Реализация ModuleApi, которую ModuleManager передаёт в хуки.
+///
+/// Приватная — модули работают с ней только через контракт ModuleApi
+/// (Этап 7), не зная о ModuleManager вообще.
+class _ModuleApiImpl implements ModuleApi {
+  _ModuleApiImpl({
+    required this.module,
+    required this.storage,
+    required GlobalSearchService searchService,
+  }) : _searchService = searchService;
+
+  final Module module;
+  final GlobalSearchService _searchService;
+
+  @override
+  final ModuleStorage storage;
+
+  @override
+  void registerSearchProvider(SearchProvider provider) {
+    _checkPermission(ModulePermission.coreSearch);
+    _searchService.registerProvider(provider);
+  }
+
+  @override
+  void unregisterSearchProvider(SearchProvider provider) {
+    // Отписка не требует повторной проверки разрешения — модуль,
+    // у которого разрешение отозвали, всё равно должен суметь
+    // убрать за собой ранее зарегистрированные результаты.
+    _searchService.unregisterProvider(provider);
+  }
+
+  void _checkPermission(ModulePermission permission) {
+    if (!module.manifest.permissions.contains(permission)) {
+      throw ModuleLifecycleError(
+        module.id,
+        'нет разрешения "$permission" в манифесте',
+      );
+    }
+  }
+}

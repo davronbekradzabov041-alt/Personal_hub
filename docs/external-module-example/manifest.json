@@ -1,0 +1,11 @@
+{
+  "id": "notes-lite",
+  "name": "Notes Lite",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "author": "Example Author",
+  "description": "Иллюстративный пример внешнего модуля (заметки). Не устанавливается и не выполняется — только пример формата manifest.json из Этапа 11.",
+  "permissions": ["core.search"],
+  "dependencies": [],
+  "icon": "assets/icon.png"
+}
