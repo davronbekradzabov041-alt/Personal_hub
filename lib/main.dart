@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'app.dart';
 import 'core/database/isar_service.dart';
 import 'core/database/models/core_test_item.dart';
@@ -24,6 +25,9 @@ import 'core/settings/app_settings_controller.dart';
 /// (Этап 10), всё до runApp(), чтобы первый кадр UI уже был готов.
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Отключить загрузку шрифтов из сети — приложение офлайн-first.
+  // Шрифты используются через кэш GoogleFonts или системный fallback.
+  GoogleFonts.config.allowRuntimeFetching = false;
 
   await IsarService.init();
   registerCoreModules();

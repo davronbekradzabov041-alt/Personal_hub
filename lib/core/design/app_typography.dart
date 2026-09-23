@@ -1,272 +1,320 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
-/// Типографическая система Personal Hub.
+/// Типографическая система Personal Hub v2.
 ///
-/// Основана на Material 3 TextTheme с адаптацией под
-/// потребности productivity-интерфейса и Focused Workspace.
+/// Основной шрифт: Plus Jakarta Sans (Modern Editorial).
+/// Поддержка FontFeature.tabularFigures() для времени, таймеров и счётчиков.
+///
+/// Все стили — runtime getters через GoogleFonts.plusJakartaSans().
+/// Не используй AppTypography в const-контекстах.
 class AppTypography {
   AppTypography._();
 
   // =========================================================================
-  // Display Metrics — Ключевые метрики (Hero, Featured numbers)
+  // Base Font Helper (Plus Jakarta Sans)
   // =========================================================================
-  static const TextStyle displayLarge = TextStyle(
-    fontSize: 60,
-    fontWeight: FontWeight.w700,
-    letterSpacing: -0.5,
-    height: 1.10,
-  );
 
-  static const TextStyle displayMedium = TextStyle(
-    fontSize: 48,
-    fontWeight: FontWeight.w700,
-    letterSpacing: -0.25,
-    height: 1.12,
-  );
-
-  static const TextStyle displaySmall = TextStyle(
-    fontSize: 36,
-    fontWeight: FontWeight.w700,
-    letterSpacing: 0,
-    height: 1.18,
-  );
+  static TextStyle _font({
+    required double fontSize,
+    required double height,
+    FontWeight fontWeight = FontWeight.w400,
+    double letterSpacing = 0.0,
+    List<FontFeature>? fontFeatures,
+    Color? color,
+  }) {
+    return GoogleFonts.plusJakartaSans(
+      fontSize: fontSize,
+      height: height,
+      fontWeight: fontWeight,
+      letterSpacing: letterSpacing,
+      fontFeatures: fontFeatures,
+      color: color,
+    );
+  }
 
   // =========================================================================
-  // Numeric Metrics — Для ключевых чисел в Feature блоках
+  // v2 Typography Scale
   // =========================================================================
-  static const TextStyle numericLarge = TextStyle(
-    fontSize: 56,
-    fontWeight: FontWeight.w700,
-    letterSpacing: -0.5,
-    height: 1.05,
-  );
 
-  static const TextStyle numericMedium = TextStyle(
-    fontSize: 40,
-    fontWeight: FontWeight.w700,
-    letterSpacing: -0.25,
-    height: 1.10,
-  );
+  /// Display Large — 36 / 41, weight 700, letter-spacing -0.8
+  /// Используется исключительно для главного фокуса дня в Hero.
+  static TextStyle get displayLarge => _font(
+        fontSize: 36,
+        height: 41 / 36,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.8,
+      );
 
-  static const TextStyle numericSmall = TextStyle(
-    fontSize: 24,
-    fontWeight: FontWeight.w600,
-    letterSpacing: 0,
-    height: 1.20,
-  );
+  /// Display Medium — 28 / 34, weight 700, letter-spacing -0.5
+  /// Крупные таймеры / время ключевого блока / statValue.
+  static TextStyle get displayMedium => _font(
+        fontSize: 28,
+        height: 34 / 28,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.5,
+      );
+
+  /// Display Small — 24 / 30, weight 700, letter-spacing -0.4
+  static TextStyle get displaySmall => _font(
+        fontSize: 24,
+        height: 30 / 24,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.4,
+      );
+
+  /// Headline Large — 22 / 28, weight 700, letter-spacing -0.3
+  /// Заголовки экранов и модульных страниц.
+  static TextStyle get headlineLarge => _font(
+        fontSize: 22,
+        height: 28 / 22,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.3,
+      );
+
+  /// Headline Medium — 18 / 24, weight 600, letter-spacing -0.2
+  /// Заголовки секций (Upcoming, Today Timeline).
+  static TextStyle get headlineMedium => _font(
+        fontSize: 18,
+        height: 24 / 18,
+        fontWeight: FontWeight.w600,
+        letterSpacing: -0.2,
+      );
+
+  /// Headline Small — 16 / 22, weight 600, letter-spacing 0.0
+  static TextStyle get headlineSmall => _font(
+        fontSize: 16,
+        height: 22 / 16,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.0,
+      );
+
+  /// Title Large — 20 / 26, weight 600, letter-spacing -0.2
+  static TextStyle get titleLarge => _font(
+        fontSize: 20,
+        height: 26 / 20,
+        fontWeight: FontWeight.w600,
+        letterSpacing: -0.2,
+      );
+
+  /// Title Medium — 16 / 22, weight 600, letter-spacing 0.0
+  /// Название события, имя модуля в плитке.
+  static TextStyle get titleMedium => _font(
+        fontSize: 16,
+        height: 22 / 16,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.0,
+      );
+
+  /// Title Small — 14 / 20, weight 600, letter-spacing +0.1
+  static TextStyle get titleSmall => _font(
+        fontSize: 14,
+        height: 20 / 14,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.1,
+      );
+
+  /// Body Large — 15 / 22, weight 400, letter-spacing 0.0
+  /// Основной текст описаний, заметок.
+  static TextStyle get bodyLarge => _font(
+        fontSize: 15,
+        height: 22 / 15,
+        fontWeight: FontWeight.w400,
+        letterSpacing: 0.0,
+      );
+
+  /// Body Medium — 14 / 20, weight 400, letter-spacing +0.1
+  /// Вторичный текст, метаданные.
+  static TextStyle get bodyMedium => _font(
+        fontSize: 14,
+        height: 20 / 14,
+        fontWeight: FontWeight.w400,
+        letterSpacing: 0.1,
+      );
+
+  /// Body Small — 12 / 16, weight 400, letter-spacing +0.2
+  /// Пояснительные сноски, второстепенные подсказки.
+  static TextStyle get bodySmall => _font(
+        fontSize: 12,
+        height: 16 / 12,
+        fontWeight: FontWeight.w400,
+        letterSpacing: 0.2,
+      );
+
+  /// Label Large — 14 / 20, weight 600, letter-spacing +0.1
+  /// Кнопки, основные вкладки.
+  static TextStyle get labelLarge => _font(
+        fontSize: 14,
+        height: 20 / 14,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.1,
+      );
+
+  /// Label Medium — 12 / 16, weight 600, letter-spacing +0.5
+  static TextStyle get labelMedium => _font(
+        fontSize: 12,
+        height: 16 / 12,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.5,
+      );
+
+  /// Label Small / Small Caps — 11 / 14, weight 700, letter-spacing +0.8
+  /// Метки категорий, статусы (UPPERCASE).
+  static TextStyle get labelSmall => _font(
+        fontSize: 11,
+        height: 14 / 11,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.8,
+      );
 
   // =========================================================================
-  // Headlines — Заголовки секций и крупных блоков
+  // Time Mono / Tabular — Время, таймеры, счётчики
   // =========================================================================
-  static const TextStyle headlineLarge = TextStyle(
-    fontSize: 32,
-    fontWeight: FontWeight.w700,
-    letterSpacing: 0,
-    height: 1.20,
-  );
 
-  static const TextStyle headlineMedium = TextStyle(
-    fontSize: 28,
-    fontWeight: FontWeight.w600,
-    letterSpacing: 0,
-    height: 1.25,
-  );
+  /// Time Mono/Tabular — 13 / 16, weight 600, letter-spacing +0.2
+  /// Использует FontFeature.tabularFigures() для предотвращения скачков ширины.
+  static TextStyle get timeTabular => _font(
+        fontSize: 13,
+        height: 16 / 13,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.2,
+        fontFeatures: const [FontFeature.tabularFigures()],
+      );
 
-  static const TextStyle headlineSmall = TextStyle(
-    fontSize: 24,
-    fontWeight: FontWeight.w600,
-    letterSpacing: 0,
-    height: 1.30,
-  );
+  /// Псевдоним для timeTabular.
+  static TextStyle get timeMono => timeTabular;
 
   // =========================================================================
-  // Titles — AppBar, ModuleCard name, Dialog titles
+  // Numeric — Числовые метрики с табулярными цифрами
   // =========================================================================
-  static const TextStyle titleLarge = TextStyle(
-    fontSize: 22,
-    fontWeight: FontWeight.w600,
-    letterSpacing: 0,
-    height: 1.27,
-  );
 
-  static const TextStyle titleMedium = TextStyle(
-    fontSize: 18,
-    fontWeight: FontWeight.w600,
-    letterSpacing: 0.15,
-    height: 1.35,
-  );
+  static TextStyle get numericLarge => _font(
+        fontSize: 36,
+        height: 41 / 36,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.8,
+        fontFeatures: const [FontFeature.tabularFigures()],
+      );
 
-  static const TextStyle titleSmall = TextStyle(
-    fontSize: 16,
-    fontWeight: FontWeight.w600,
-    letterSpacing: 0.1,
-    height: 1.43,
-  );
+  static TextStyle get numericMedium => _font(
+        fontSize: 28,
+        height: 34 / 28,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.5,
+        fontFeatures: const [FontFeature.tabularFigures()],
+      );
 
-  // =========================================================================
-  // Body — Основной текст
-  // =========================================================================
-  static const TextStyle bodyLarge = TextStyle(
-    fontSize: 18,
-    fontWeight: FontWeight.w400,
-    letterSpacing: 0.2,
-    height: 1.50,
-  );
-
-  static const TextStyle bodyMedium = TextStyle(
-    fontSize: 16,
-    fontWeight: FontWeight.w400,
-    letterSpacing: 0.3,
-    height: 1.50,
-  );
-
-  static const TextStyle bodySmall = TextStyle(
-    fontSize: 14,
-    fontWeight: FontWeight.w400,
-    letterSpacing: 0.4,
-    height: 1.43,
-  );
+  static TextStyle get numericSmall => _font(
+        fontSize: 18,
+        height: 24 / 18,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.0,
+        fontFeatures: const [FontFeature.tabularFigures()],
+      );
 
   // =========================================================================
-  // Labels — Кнопки, чипы, табы, сегментированные кнопки
+  // Semantic Aliases
   // =========================================================================
-  static const TextStyle labelLarge = TextStyle(
-    fontSize: 14,
-    fontWeight: FontWeight.w600,
-    letterSpacing: 0.1,
-    height: 1.43,
-  );
 
-  static const TextStyle labelMedium = TextStyle(
-    fontSize: 12,
-    fontWeight: FontWeight.w600,
-    letterSpacing: 0.5,
-    height: 1.33,
-  );
+  /// Псевдоним для labelSmall (UPPERCASE метки, категории).
+  static TextStyle get labelSmallCaps => labelSmall;
 
-  static const TextStyle labelSmall = TextStyle(
-    fontSize: 11,
-    fontWeight: FontWeight.w600,
-    letterSpacing: 0.5,
-    height: 1.45,
-  );
+  /// Псевдоним для labelSmall (секционные метки).
+  static TextStyle get sectionLabel => labelSmallCaps;
+
+  /// Ключевое значение метрики (Schedule: event count, etc.).
+  static TextStyle get statValue => _font(
+        fontSize: 22,
+        height: 28 / 22,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.2,
+        fontFeatures: const [FontFeature.tabularFigures()],
+      );
+
+  /// Подпись под statValue.
+  static TextStyle get statLabel => _font(
+        fontSize: 12,
+        height: 16 / 12,
+        fontWeight: FontWeight.w500,
+        letterSpacing: 0.2,
+      );
+
+  /// Метаданные карточки (дата, теги, вторичная информация).
+  static TextStyle get cardMetadata => bodySmall;
+
+  /// Лейбл чипа.
+  static TextStyle get chipLabel => labelSmall;
 
   // =========================================================================
-  // Responsive Display Sizes — Адаптивные размеры Display
+  // TextTheme Builder
   // =========================================================================
-  /// Compact (<600dp): 52 / 40 / 28
-  /// Medium (600-840dp): 56 / 44 / 32
-  /// Expanded (840-1200dp): 60 / 48 / 36
-  /// Large (>1200dp): 64 / 52 / 40
+
+  static TextTheme get lightTextTheme => TextTheme(
+        displayLarge: displayLarge,
+        displayMedium: displayMedium,
+        displaySmall: displaySmall,
+        headlineLarge: headlineLarge,
+        headlineMedium: headlineMedium,
+        headlineSmall: headlineSmall,
+        titleLarge: titleLarge,
+        titleMedium: titleMedium,
+        titleSmall: titleSmall,
+        bodyLarge: bodyLarge,
+        bodyMedium: bodyMedium,
+        bodySmall: bodySmall,
+        labelLarge: labelLarge,
+        labelMedium: labelMedium,
+        labelSmall: labelSmall,
+      );
+
+  /// Dark TextTheme идентичен Light — цвета применяются через ColorScheme.
+  static TextTheme get darkTextTheme => lightTextTheme;
+
+  // =========================================================================
+  // Responsive Display Sizes (v2 Calibrated)
+  // =========================================================================
+  // Compact (<600dp): 32 / 24 / 20
+  // Medium (600-840dp): 36 / 28 / 22
+  // Expanded (840-1200dp): 36 / 28 / 24
+  // Large (>1200dp): 36 / 28 / 24
+
   static const Map<String, double> displayLargeResponsive = {
-    'compact': 52,
-    'medium': 56,
-    'expanded': 60,
-    'large': 64,
+    'compact': 32,
+    'medium': 36,
+    'expanded': 36,
+    'large': 36,
   };
 
   static const Map<String, double> displayMediumResponsive = {
-    'compact': 40,
-    'medium': 44,
-    'expanded': 48,
-    'large': 52,
+    'compact': 24,
+    'medium': 28,
+    'expanded': 28,
+    'large': 28,
   };
 
   static const Map<String, double> displaySmallResponsive = {
-    'compact': 28,
-    'medium': 32,
-    'expanded': 36,
-    'large': 40,
+    'compact': 20,
+    'medium': 24,
+    'expanded': 24,
+    'large': 24,
   };
 
   static const Map<String, double> headlineLargeResponsive = {
-    'compact': 28,
-    'medium': 30,
-    'expanded': 32,
-    'large': 34,
+    'compact': 20,
+    'medium': 22,
+    'expanded': 22,
+    'large': 22,
   };
 
-  /// Получить размер displayLarge для брейкпоинта
-  static double getDisplayLarge(String breakpoint) {
-    return displayLargeResponsive[breakpoint] ?? 60;
-  }
+  static double getDisplayLarge(String breakpoint) =>
+      displayLargeResponsive[breakpoint] ?? 36;
 
-  /// Получить размер displayMedium для брейкпоинта
-  static double getDisplayMedium(String breakpoint) {
-    return displayMediumResponsive[breakpoint] ?? 48;
-  }
+  static double getDisplayMedium(String breakpoint) =>
+      displayMediumResponsive[breakpoint] ?? 28;
 
-  /// Получить размер displaySmall для брейкпоинта
-  static double getDisplaySmall(String breakpoint) {
-    return displaySmallResponsive[breakpoint] ?? 36;
-  }
+  static double getDisplaySmall(String breakpoint) =>
+      displaySmallResponsive[breakpoint] ?? 24;
 
-  /// Получить размер headlineLarge для брейкпоинта
-  static double getHeadlineLarge(String breakpoint) {
-    return headlineLargeResponsive[breakpoint] ?? 32;
-  }
-
-  // =========================================================================
-  // TextTheme для Light Theme
-  // =========================================================================
-  static const TextTheme lightTextTheme = TextTheme(
-    displayLarge: displayLarge,
-    displayMedium: displayMedium,
-    displaySmall: displaySmall,
-    headlineLarge: headlineLarge,
-    headlineMedium: headlineMedium,
-    headlineSmall: headlineSmall,
-    titleLarge: titleLarge,
-    titleMedium: titleMedium,
-    titleSmall: titleSmall,
-    bodyLarge: bodyLarge,
-    bodyMedium: bodyMedium,
-    bodySmall: bodySmall,
-    labelLarge: labelLarge,
-    labelMedium: labelMedium,
-    labelSmall: labelSmall,
-  );
-
-  // =========================================================================
-  // TextTheme для Dark Theme (те же размеры)
-  // =========================================================================
-  static const TextTheme darkTextTheme = lightTextTheme;
-
-  // =========================================================================
-  // Custom Styles
-  // =========================================================================
-  static const TextStyle sectionLabel = TextStyle(
-    fontSize: 13,
-    fontWeight: FontWeight.w600,
-    letterSpacing: 0.5,
-    height: 1.38,
-  );
-
-  static const TextStyle statValue = TextStyle(
-    fontSize: 20,
-    fontWeight: FontWeight.w700,
-    letterSpacing: -0.2,
-    height: 1.2,
-  );
-
-  static const TextStyle statLabel = TextStyle(
-    fontSize: 12,
-    fontWeight: FontWeight.w500,
-    letterSpacing: 0.5,
-    height: 1.33,
-  );
-
-  static const TextStyle cardMetadata = TextStyle(
-    fontSize: 12,
-    fontWeight: FontWeight.w400,
-    letterSpacing: 0.4,
-    height: 1.33,
-  );
-
-  static const TextStyle chipLabel = TextStyle(
-    fontSize: 11,
-    fontWeight: FontWeight.w600,
-    letterSpacing: 0.5,
-    height: 1.45,
-  );
+  static double getHeadlineLarge(String breakpoint) =>
+      headlineLargeResponsive[breakpoint] ?? 22;
 }
