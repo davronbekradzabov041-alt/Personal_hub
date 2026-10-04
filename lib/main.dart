@@ -100,7 +100,19 @@ Future<Widget> _bootstrap() async {
   final moduleStateRepository = ModuleStateRepository();
   final statePersistence =
       ModuleStatePersistence(moduleManager, moduleStateRepository);
-  await ModuleStateRestorer(moduleManager, moduleStateRepository).restore();
+  // Восстановление идёт в restore-транзакции: install() → enable() —
+  // это последовательность шагов одного намерения, а persist-слой не
+  // должен записать её промежуточный шаг (installed) как решение
+  // пользователя. Иначе сбой на enable() навсегда понижает сохранённое
+  // «включён» до «установлен, но выключен». Подробнее —
+  // ModuleStatePersistence.runRestoreTransaction.
+  await statePersistence.runRestoreTransaction(
+    () => ModuleStateRestorer(
+      moduleManager,
+      moduleStateRepository,
+      onError: (error, _) => _logError('восстановление состояния модуля', error),
+    ).restore(),
+  );
   await ensureBuiltinModulesInstalled(moduleManager, moduleStateRepository);
 
   // Стартовые записи (восстановление состояний + автоустановка

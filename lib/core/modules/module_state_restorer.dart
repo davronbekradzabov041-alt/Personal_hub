@@ -2,6 +2,21 @@ import 'module_manager.dart';
 import 'module_state.dart';
 import 'module_state_store.dart';
 
+/// Модуль не удалось вернуть в сохранённое состояние при старте.
+///
+/// Наружу не бросается: один сбойный модуль не должен мешать запуску
+/// остальных. Передаётся в [ModuleStateRestorer.onError] и собирается в
+/// [ModuleStateRestorer.failures], чтобы сбой не оставался невидимым.
+class ModuleRestoreException implements Exception {
+  ModuleRestoreException(this.moduleId, this.error);
+
+  final String moduleId;
+  final Object error;
+
+  @override
+  String toString() => 'не удалось восстановить модуль $moduleId: $error';
+}
+
 /// Восстанавливает состояние модулей из хранилища в свежий
 /// ModuleManager при старте приложения.
 ///
@@ -21,13 +36,35 @@ import 'module_state_store.dart';
 /// Убрать его можно только добавив в ModuleManager отдельный метод
 /// восстановления без хуков — то есть изменив запрещённый на этом
 /// этапе файл.
+///
+/// Что restore() НЕ делает: он не трогает хранилище, кроме одного
+/// случая — вернуть сохранённое намерение, если восстановление
+/// сорвалось (см. [_restoreStoredIntent]). Промежуточные состояния
+/// install() → enable() в хранилище не пишутся: вызывающий выполняет
+/// restore() внутри ModuleStatePersistence.runRestoreTransaction(),
+/// иначе persist-слой успел бы зафиксировать состояние `installed` как
+/// пользовательское намерение.
 class ModuleStateRestorer {
-  ModuleStateRestorer(this._manager, this._store);
+  ModuleStateRestorer(
+    this._manager,
+    this._store, {
+    void Function(Object error, StackTrace stackTrace)? onError,
+  }) : _onError = onError;
 
   final ModuleManager _manager;
   final ModuleStateStore _store;
+  final void Function(Object error, StackTrace stackTrace)? _onError;
+
+  final List<ModuleRestoreException> _failures = [];
+
+  /// Сбои последнего [restore] — по одному на модуль.
+  List<ModuleRestoreException> get failures => List.unmodifiable(_failures);
+
+  /// Сколько модулей не удалось восстановить в последнем [restore].
+  int get failedCount => _failures.length;
 
   Future<void> restore() async {
+    _failures.clear();
     final snapshots = await _store.loadAll();
 
     for (final snapshot in snapshots) {
@@ -49,18 +86,51 @@ class ModuleStateRestorer {
             await _manager.disable(moduleId);
             break;
           case ModuleState.uninstalled:
-            // Не должно встречаться: uninstall удаляет запись из
+            // Не долечивать: uninstall удаляет запись из
             // хранилища (см. ModuleStatePersistence), а не помечает
-            // её uninstalled. На всякий случай — просто пропускаем.
+            // её как uninstalled. На любой случай — просто пропускаем.
             break;
         }
-      } catch (_) {
-        // Модуль мог перестать быть зарегистрирован между запусками
-        // (например, убрали из module_bootstrap.dart) — тогда
-        // install() бросит ModuleLifecycleError. Один сломанный
-        // модуль не должен останавливать восстановление остальных
-        // или запуск приложения.
+      } catch (error, stackTrace) {
+        // Модуль мог перестать быть зарегистрированным между запусками
+        // (например, удалён из module_bootstrap.dart) — тогда install()
+        // бросит ModuleLifecycleError. Один сломанный модуль не должен
+        // мешать запуску остальных.
+        //
+        // Но молчать здесь нельзя. enable() вызывает хук модуля ДО
+        // мутации состояния, поэтому упавший onEnable() оставляет модуль
+        // в состоянии installed. Если persist-слой успел записать это
+        // промежуточное состояние, сохранённое намерение «включён» исчезает
+        // навсегда: следующий запуск прочитает installed и не станет
+        // повторять попытку включения. Поэтому возвращаем в хранилище
+        // снимок, который restore() уже прочитал, и сообщаем о сбое.
+        await _restoreStoredIntent(snapshot);
+        final failure = ModuleRestoreException(moduleId, error);
+        _failures.add(failure);
+        _onError?.call(failure, stackTrace);
       }
+    }
+  }
+
+  /// Возвращает в хранилище снимок, прочитанный в начале restore(),
+  /// если что-то успело его заменить.
+  ///
+  /// Корректность порядка обеспечивает вызывающий (main.dart): restore()
+  /// выполняется внутри ModuleStatePersistence.runRestoreTransaction(),
+  /// поэтому синхронизация не ставит в очередь записи промежуточных
+  /// состояний и правка этого метода не может быть затёрта более поздней
+  /// записью того же запуска.
+  Future<void> _restoreStoredIntent(ModuleStateSnapshot snapshot) async {
+    try {
+      final current = await _store.load(snapshot.moduleId);
+      if (current == null) return;
+      if (current.state == snapshot.state && current.enabled == snapshot.enabled) {
+        return;
+      }
+      await _store.save(snapshot);
+    } catch (_) {
+      // Хранилище недоступно — восстановить намерение нечем. Исходная
+      // ошибка уже передана через onError, а вторичная её не уточнит.
     }
   }
 

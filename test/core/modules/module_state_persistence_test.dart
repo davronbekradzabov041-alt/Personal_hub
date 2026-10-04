@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_hub/core/modules/module.dart';
+import 'package:personal_hub/core/modules/module_api.dart';
 import 'package:personal_hub/core/modules/module_lifecycle_error.dart';
 import 'package:personal_hub/core/modules/module_manager.dart';
 import 'package:personal_hub/core/modules/module_manifest.dart';
@@ -29,6 +30,28 @@ class _FakeModule extends Module {
 
   @override
   Widget buildPage(BuildContext context) => const SizedBox.shrink();
+}
+
+/// Модуль, у которого onEnable() падает. Используется регрессией
+/// восстановления: install() проходит, а включение — нет.
+class _FailingEnableModule extends Module {
+  _FailingEnableModule(this._manifest);
+
+  final ModuleManifest _manifest;
+
+  @override
+  ModuleManifest get manifest => _manifest;
+
+  @override
+  IconData get icon => Icons.extension_outlined;
+
+  @override
+  Widget buildPage(BuildContext context) => const SizedBox.shrink();
+
+  @override
+  Future<void> onEnable(ModuleApi api) async {
+    throw StateError('onEnable не удалось');
+  }
 }
 
 /// Фейковая in-memory реализация ModuleStateStore — заменяет Isar,
@@ -195,6 +218,124 @@ void main() {
     await ModuleStateRestorer(freshManager, store).restore();
 
     expect(freshManager.stateOf('demo'), ModuleState.disabled);
+  });
+
+  // --- Регрессия: сбой onEnable() при восстановлении не понижает
+  // сохранённое намерение «включён» до «установлен, но выключен».
+
+  test('сбой onEnable() при restore не теряет сохранённое «включён»', () async {
+    const manifest = ModuleManifest(
+      id: 'demo',
+      name: 'Demo',
+      version: '1.0.0',
+      apiVersion: kCoreModuleApiVersion,
+      author: 'Test',
+    );
+
+    // Первый запуск: модуль установлен и включён, намерение записано.
+    await manager.install('demo');
+    await manager.enable('demo');
+    await persistence.flush();
+    expect((await store.load('demo'))!.enabled, isTrue);
+
+    // Холодный старт: в реестре уже другой модуль того же id, и его
+    // onEnable() падает. install() проходит, enable() — нет.
+    ModuleRegistry.clear();
+    ModuleRegistry.register(_FailingEnableModule(manifest));
+
+    final freshManager = ModuleManager(searchService: GlobalSearchService());
+    final freshPersistence = ModuleStatePersistence(freshManager, store);
+    await ModuleStateRestorer(freshManager, store).restore();
+    await freshPersistence.flush();
+
+    // Сохранённое намерение не понижено.
+    final after = await store.load('demo');
+    expect(after, isNotNull);
+    expect(after!.state, 'enabled');
+    expect(after.enabled, isTrue);
+
+    freshPersistence.dispose();
+  });
+
+  test('сбой onEnable() при restore: модуль не объявлен включённым, '
+      'ошибка наблюдаема, следующий запуск повторяет попытку', () async {
+    const manifest = ModuleManifest(
+      id: 'demo',
+      name: 'Demo',
+      version: '1.0.0',
+      apiVersion: kCoreModuleApiVersion,
+      author: 'Test',
+    );
+
+    await manager.install('demo');
+    await manager.enable('demo');
+    await persistence.flush();
+
+    ModuleRegistry.clear();
+    ModuleRegistry.register(_FailingEnableModule(manifest));
+
+    final freshManager = ModuleManager(searchService: GlobalSearchService());
+    final freshPersistence = ModuleStatePersistence(freshManager, store);
+    final reported = <ModuleRestoreException>[];
+    final restorer = ModuleStateRestorer(
+      freshManager,
+      store,
+      onError: (error, _) => reported.add(error as ModuleRestoreException),
+    );
+
+    // Ровно тот порядок, что в main.dart на холодном старте.
+    await freshPersistence.runRestoreTransaction(restorer.restore);
+    await freshPersistence.flush();
+
+    // Намерение сохранено.
+    final after = await store.load('demo');
+    expect(after!.state, 'enabled');
+    expect(after.enabled, isTrue);
+
+    // Модуль не объявлен включённым: хук упал, активности нет.
+    expect(freshManager.stateOf('demo'), ModuleState.installed);
+    expect(freshManager.isEnabled('demo'), isFalse);
+
+    // Сбой виден вызывающему, а не проглочен.
+    expect(restorer.failedCount, 1);
+    expect(reported, hasLength(1));
+    expect(reported.single.moduleId, 'demo');
+
+    freshPersistence.dispose();
+
+    // Следующий запуск: модуль починили — включение повторяется.
+    ModuleRegistry.clear();
+    ModuleRegistry.register(_FakeModule(manifest));
+
+    final nextManager = ModuleManager(searchService: GlobalSearchService());
+    final nextPersistence = ModuleStatePersistence(nextManager, store);
+    await nextPersistence.runRestoreTransaction(
+      () => ModuleStateRestorer(nextManager, store).restore(),
+    );
+    await nextPersistence.flush();
+
+    expect(nextManager.stateOf('demo'), ModuleState.enabled);
+    expect((await store.load('demo'))!.enabled, isTrue);
+    nextPersistence.dispose();
+  });
+
+  test('успешный restore сохраняет сохранённое «включён»', () async {
+    await manager.install('demo');
+    await manager.enable('demo');
+    await persistence.flush();
+
+    final freshManager = ModuleManager(searchService: GlobalSearchService());
+    final freshPersistence = ModuleStatePersistence(freshManager, store);
+    await freshPersistence.runRestoreTransaction(
+      () => ModuleStateRestorer(freshManager, store).restore(),
+    );
+    await freshPersistence.flush();
+
+    expect(freshManager.stateOf('demo'), ModuleState.enabled);
+    final after = await store.load('demo');
+    expect(after!.state, 'enabled');
+    expect(after.enabled, isTrue);
+    freshPersistence.dispose();
   });
 
   // Bug #6 regression tests
