@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_hub/core/modules/module_storage.dart';
 import 'package:personal_hub/modules/schedule/models/schedule_event.dart';
+import 'package:personal_hub/modules/schedule/schedule_category_repository.dart';
 import 'package:personal_hub/modules/schedule/schedule_repository.dart';
 import 'package:personal_hub/modules/schedule/ui/event_form_screen.dart';
 
@@ -61,6 +62,7 @@ void main() {
                       MaterialPageRoute<void>(
                         builder: (_) => EventFormScreen(
                           repository: repository,
+                          categoryRepository: ScheduleCategoryRepository(storage),
                           existing: existingEvent(),
                         ),
                       ),

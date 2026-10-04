@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../core/design/design_system.dart';
 import '../../models/schedule_event.dart';
+import '../category_visuals.dart';
 
 /// Timeline Strip v1 — горизонтальная шкала дня.
 ///
@@ -15,16 +16,21 @@ class TimelineStrip extends StatelessWidget {
     required this.events,
     required this.currentMinutes,
     required this.onEventTap,
+    this.categoryResolver,
   });
 
   final List<ScheduleEvent> events;
   final int currentMinutes;
   final void Function(ScheduleEvent event) onEventTap;
 
+  /// Правило разрешения категории; null — блоки красятся по приоритету.
+  final CategoryResolver? categoryResolver;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final resolver = categoryResolver;
 
     // День: 0:00 - 24:00 = 1440 минут
     const dayStart = 0;
@@ -33,7 +39,7 @@ class TimelineStrip extends StatelessWidget {
     // Сортируем события по времени начала
     final sortedEvents = [...events]..sort((a, b) => a.startMinutes.compareTo(b.startMinutes));
 
-    // Строим сегменты: свободное + событие + свободное + ...
+    // Строим сегменты: свободный + событие + свободный + ...
     final segments = _buildSegments(sortedEvents, dayStart, dayEnd);
 
     return LayoutBuilder(
@@ -51,6 +57,7 @@ class TimelineStrip extends StatelessWidget {
               dayEnd: dayEnd,
               theme: theme,
               isDark: isDark,
+              colorOf: (event) => _eventColor(event, resolver, theme),
             ),
             child: Stack(
               children: segments.map((segment) {
@@ -64,6 +71,32 @@ class TimelineStrip extends StatelessWidget {
         );
       },
     );
+  }
+
+  /// Цвет блока события: категория, если она есть, иначе приоритет.
+  ///
+  /// Категория важнее приоритета на этой шкале: полоса показывает, чем
+  /// занят день, и ответ «работа» полезнее ответа «средний». События без
+  /// категории сохраняют прежнюю раскраску по приоритету, поэтому
+  /// шкала не меняет вид у тех данных, где категорий ещё нет.
+  Color _eventColor(
+    ScheduleEvent event,
+    CategoryResolver? resolver,
+    ThemeData theme,
+  ) {
+    final category = resolver?.resolve(event);
+    if (category != null && category.hasAppearance) {
+      return Color(category.colorValue!);
+    }
+
+    switch (event.priority) {
+      case EventPriority.high:
+        return theme.colorScheme.error;
+      case EventPriority.low:
+        return theme.colorScheme.tertiary;
+      default:
+        return theme.colorScheme.primary;
+    }
   }
 
   Widget _buildEventOverlay(BuildContext context, _TimelineSegment segment, double stripWidth) {
@@ -85,10 +118,10 @@ class TimelineStrip extends StatelessWidget {
         child: InkWell(
           onTap: () => onEventTap(event),
           borderRadius: BorderRadius.circular(AppRadiiValues.sm),
-          child: Container(
-            padding: EdgeInsets.symmetric(horizontal: AppSpacing.xs, vertical: AppSpacing.xs),
-            decoration: BoxDecoration(
-              color: _getEventColor(event, theme).withValues(alpha: 0.9),
+child: Container(
+              padding: EdgeInsets.symmetric(horizontal: AppSpacing.xs, vertical: AppSpacing.xs),
+              decoration: BoxDecoration(
+                color: _eventColor(event, categoryResolver, theme).withValues(alpha: 0.9),
               borderRadius: BorderRadius.circular(AppRadiiValues.sm),
               boxShadow: [
                 BoxShadow(
@@ -176,18 +209,6 @@ class TimelineStrip extends StatelessWidget {
   double _minutesToFraction(int minutes) {
     return (minutes / 1440).clamp(0.0, 1.0);
   }
-
-  Color _getEventColor(ScheduleEvent event, ThemeData theme) {
-    // Простая цветовая кодировка по категории/приоритету
-    switch (event.priority) {
-      case EventPriority.high:
-        return theme.colorScheme.error;
-      case EventPriority.low:
-        return theme.colorScheme.tertiary;
-      default:
-        return theme.colorScheme.primary;
-    }
-  }
 }
 
 enum _SegmentType { free, event }
@@ -227,6 +248,7 @@ class _TimelinePainter extends CustomPainter {
     required this.dayEnd,
     required this.theme,
     required this.isDark,
+    required this.colorOf,
   });
 
   final List<_TimelineSegment> segments;
@@ -235,6 +257,22 @@ class _TimelinePainter extends CustomPainter {
   final int dayEnd;
   final ThemeData theme;
   final bool isDark;
+
+  /// Цвет события. Передаётся функцией, а не готовым цветом: painter
+  /// перерисовывается и при смене событий, и при смене справочника
+  /// категорий, и правило разрешения живёт в виджете, а не дублируется
+  /// здесь.
+  final Color Function(ScheduleEvent event) colorOf;
+
+  /// Цвета блоков, посчитанные один раз при создании painter'а.
+  ///
+  /// Нужны для [shouldRepaint]: переименование категории меняет цвета,
+  /// но НЕ меняет [segments], и сравнение только по сегментам оставило
+  /// бы на экране старые цвета до следующего обновления шкалы.
+  late final List<Color> _segmentColors = <Color>[
+    for (final segment in segments)
+      if (segment.event != null) colorOf(segment.event!) else Colors.transparent,
+  ];
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -246,7 +284,8 @@ class _TimelinePainter extends CustomPainter {
     canvas.drawRect(bgRect, paint);
 
     // Сегменты
-    for (final segment in segments) {
+    for (var index = 0; index < segments.length; index++) {
+      final segment = segments[index];
       final left = _minutesToX(segment.start, size.width);
       final right = _minutesToX(segment.end, size.width);
 
@@ -258,7 +297,7 @@ class _TimelinePainter extends CustomPainter {
         _drawDashedLine(canvas, left, right, size.height / 2, paint);
       } else {
         // Событие — яркая линия
-        paint.color = _getEventColor(segment.event!, theme);
+        paint.color = _segmentColors[index];
         paint.strokeWidth = 6;
         paint.style = PaintingStyle.stroke;
         canvas.drawLine(
@@ -301,23 +340,17 @@ class _TimelinePainter extends CustomPainter {
     }
   }
 
-  Color _getEventColor(ScheduleEvent event, ThemeData theme) {
-    switch (event.priority) {
-      case EventPriority.high:
-        return theme.colorScheme.error;
-      case EventPriority.low:
-        return theme.colorScheme.tertiary;
-      default:
-        return theme.colorScheme.primary;
-    }
-  }
-
   @override
   bool shouldRepaint(covariant _TimelinePainter oldDelegate) {
     if (oldDelegate.currentMinutes != currentMinutes) return true;
     if (oldDelegate.segments.length != segments.length) return true;
-    for (int i = 0; i < segments.length; i++) {
-      if (oldDelegate.segments[i] != segments[i]) return true;
+    // Переименование или перекраска категории меняют цвета при тех же
+    // самых событиях — иначе шкала осталась бы со старыми цветами.
+    for (var index = 0; index < _segmentColors.length; index++) {
+      if (oldDelegate._segmentColors[index] != _segmentColors[index]) return true;
+    }
+    for (var index = 0; index < segments.length; index++) {
+      if (oldDelegate.segments[index] != segments[index]) return true;
     }
     return false;
   }

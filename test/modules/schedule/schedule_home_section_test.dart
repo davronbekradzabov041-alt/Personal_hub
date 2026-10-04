@@ -20,6 +20,7 @@ import 'package:personal_hub/core/modules/module_registry.dart';
 import 'package:personal_hub/core/modules/module_storage.dart';
 import 'package:personal_hub/core/navigation/app_routes.dart';
 import 'package:personal_hub/core/search/global_search_service.dart';
+import 'package:personal_hub/modules/schedule/models/category.dart';
 import 'package:personal_hub/modules/schedule/models/schedule_event.dart';
 import 'package:personal_hub/modules/schedule/schedule_module.dart';
 import 'package:personal_hub/modules/schedule/ui/event_form_screen.dart';
@@ -46,6 +47,12 @@ class _InMemoryStorage implements ModuleStorage {
   void putEvent(ScheduleEvent event) {
     _data['event:${event.id}'] = jsonEncode(event.toJson());
   }
+
+  /// Кладёт категорию так же, как это делает
+  /// ScheduleCategoryRepository.create.
+  void putCategory(Category category) {
+    _data['category:${category.id}'] = jsonEncode(category.toJson());
+  }
 }
 
 ScheduleEvent _event({
@@ -53,17 +60,35 @@ ScheduleEvent _event({
   required String title,
   int startMinutes = 0,
   int endMinutes = 1439,
+  String? categoryId,
+  String category = '',
 }) {
   final now = DateTime.now();
   return ScheduleEvent(
     id: id,
     title: title,
-    category: 'Работа',
+    category: category,
+    categoryId: categoryId,
     priority: EventPriority.medium,
     date: DateTime(now.year, now.month, now.day),
     startMinutes: startMinutes,
     endMinutes: endMinutes,
     status: EventStatus.planned,
+  );
+}
+
+Category _category({
+  required String id,
+  required String name,
+  int colorValue = 0xFFD97706,
+  String iconKey = 'work',
+}) {
+  return Category(
+    id: id,
+    name: name,
+    colorValue: colorValue,
+    iconKey: iconKey,
+    order: 0,
   );
 }
 
@@ -118,6 +143,16 @@ void main() {
       contains('overflowed by'),
       reason: 'поймана не та ошибка, которую этот тест ожидал: $error',
     );
+  }
+
+  /// Гасит известное переполнение TimelineStrip, не требуя его.
+  ///
+  /// Переполнение возникает при РАЗМЕТКЕ, поэтому после перерисовки
+  /// шкалы с новым цветом, но теми же размерами, повторной разметки не
+  /// будет — и ошибки тоже. Строгий [takeKnownTimelineOverflow] для
+  /// такого случая не годится: он требует ошибку, которой здесь нет.
+  void takeKnownTimelineOverflowIfAny(WidgetTester tester) {
+    tester.takeException();
   }
 
   group('Schedule: Home-секция', () {
@@ -208,6 +243,65 @@ void main() {
       expect(sections, hasLength(1));
       expect(sections.single.moduleId, 'schedule');
       expect(sections.single.onRefresh, isNotNull);
+    });
+
+    testWidgets('показывает актуальное имя категории', (tester) async {
+      // Событие ссылается на «Деловые», а в устаревшей строке осталось
+      // старое имя: главный экран обязан показывать то, на что событие
+      // ссылается сейчас.
+      storage.putCategory(_category(id: 'c1', name: 'Деловые'));
+      storage.putEvent(_event(
+        id: 'e1',
+        title: 'Планёрка',
+        categoryId: 'c1',
+        category: 'Работа',
+      ));
+
+      await tester.pumpWidget(home());
+      await tester.pumpAndSettle();
+      takeKnownTimelineOverflow(tester);
+
+      expect(find.textContaining('Деловые'), findsWidgets);
+      expect(find.textContaining('Работа'), findsNothing);
+    });
+
+    testWidgets('после переименования показывает новое имя', (tester) async {
+      storage.putCategory(_category(id: 'c1', name: 'Деловые'));
+      storage.putEvent(_event(
+        id: 'e1',
+        title: 'Планёрка',
+        categoryId: 'c1',
+        category: 'Деловые',
+      ));
+
+      await tester.pumpWidget(home());
+      await tester.pumpAndSettle();
+      takeKnownTimelineOverflow(tester);
+      expect(find.textContaining('Деловые'), findsWidgets);
+
+      // Переименование в справочнике — данные главного экрана устарели.
+      storage.putCategory(_category(id: 'c1', name: 'Служебные'));
+      await tester.fling(
+        find.byType(CustomScrollView),
+        const Offset(0.0, 400.0),
+        1000.0,
+      );
+      await tester.pumpAndSettle();
+      takeKnownTimelineOverflowIfAny(tester);
+
+      expect(find.textContaining('Служебные'), findsWidgets);
+      expect(find.textContaining('Деловые'), findsNothing);
+    });
+
+    testWidgets('событие без категории показывает «Без категории»',
+        (tester) async {
+      storage.putEvent(_event(id: 'e1', title: 'Прогулка'));
+
+      await tester.pumpWidget(home());
+      await tester.pumpAndSettle();
+      takeKnownTimelineOverflow(tester);
+
+      expect(find.textContaining('Без категории'), findsWidgets);
     });
   });
 }

@@ -1,16 +1,30 @@
 import 'package:flutter/material.dart';
 import '../../../core/design/design_system.dart';
 import '../models/schedule_event.dart';
+import 'category_visuals.dart';
 
 /// Одна строка события — используется и на «Сегодня», и в «Календаре».
 class EventTile extends StatelessWidget {
-  const EventTile({super.key, required this.event, required this.onTap});
+  const EventTile({
+    super.key,
+    required this.event,
+    required this.onTap,
+    this.category,
+  });
 
   final ScheduleEvent event;
   final VoidCallback onTap;
 
+  /// Разрешённая категория. null — вызывающий её не перечитывал, и
+  /// плитка показывает только время и статус: показывать устаревшую
+  /// строку события здесь означало бы показать ПЕРВОЕ из двух разных
+  /// правил (второе — в [CategoryResolver]).
+  final ResolvedCategory? category;
+
   @override
   Widget build(BuildContext context) {
+    final resolved = category;
+
     return AppComponents.card(
       onTap: onTap,
       child: ListTile(
@@ -30,13 +44,33 @@ class EventTile extends StatelessWidget {
                 )
               : null,
         ),
-        subtitle: Text(
-          '${ScheduleEvent.formatMinutes(event.startMinutes)}–'
-          '${ScheduleEvent.formatMinutes(event.endMinutes)} · '
-          '${event.category} · ${event.status.label}',
-          style: AppTypography.cardMetadata.copyWith(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
+        subtitle: Row(
+          children: [
+            Flexible(
+              child: Text(
+                '${ScheduleEvent.formatMinutes(event.startMinutes)}–'
+                '${ScheduleEvent.formatMinutes(event.endMinutes)}'
+                '${resolved == null ? '' : ' · ${resolved.name}'} · '
+                '${event.status.label}',
+                style: AppTypography.cardMetadata.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (resolved != null)
+              Padding(
+                padding: const EdgeInsets.only(left: AppSpacing.xs),
+                child: Icon(
+                  resolved.icon,
+                  size: 14,
+                  color: resolved.colorOr(
+                    Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+          ],
         ),
         trailing: Icon(
           _statusIcon(event.status),

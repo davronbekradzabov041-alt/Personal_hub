@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../core/design/design_system.dart';
 import '../../models/schedule_event.dart';
+import '../category_visuals.dart';
 
 /// Upcoming Agenda — список ближайших событий (максимум 3).
 ///
@@ -12,6 +13,7 @@ class UpcomingAgenda extends StatelessWidget {
     required this.events,
     required this.onNavigateToSchedule,
     required this.onEventTap,
+    this.categoryResolver,
     this.maxItems = 3,
   });
 
@@ -19,6 +21,11 @@ class UpcomingAgenda extends StatelessWidget {
   final VoidCallback onNavigateToSchedule;
   final void Function(ScheduleEvent event) onEventTap;
   final int maxItems;
+
+  /// Правило разрешения категории. null — виджет показывает события без
+  /// категорий: он же используется в тестах и превью, где справочника
+  /// нет, и выдумывать подпись значило бы расходиться с [CategoryResolver].
+  final CategoryResolver? categoryResolver;
 
   @override
   Widget build(BuildContext context) {
@@ -37,6 +44,8 @@ class UpcomingAgenda extends StatelessWidget {
     if (displayEvents.isEmpty) {
       return _EmptyState(onNavigate: onNavigateToSchedule);
     }
+
+    final resolver = categoryResolver;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -68,17 +77,22 @@ class UpcomingAgenda extends StatelessWidget {
           ],
         ),
         SizedBox(height: AppSpacing.space3),
-        ...displayEvents.map((event) => _AgendaItem(event: event, onTap: onEventTap)).toList(),
+        ...displayEvents.map((event) => _AgendaItem(
+              event: event,
+              category: resolver?.resolve(event),
+              onTap: onEventTap,
+            )).toList(),
       ],
     );
   }
 }
 
 class _AgendaItem extends StatelessWidget {
-  const _AgendaItem({required this.event, required this.onTap});
+  const _AgendaItem({required this.event, required this.onTap, this.category});
 
   final ScheduleEvent event;
   final void Function(ScheduleEvent event) onTap;
+  final ResolvedCategory? category;
 
   @override
   Widget build(BuildContext context) {
@@ -149,7 +163,8 @@ class _AgendaItem extends StatelessWidget {
                     ),
                     SizedBox(height: AppSpacing.xs),
                     Text(
-                      '${ScheduleEvent.formatMinutes(event.startMinutes)}–${ScheduleEvent.formatMinutes(event.endMinutes)}  ·  ${event.category}',
+                      '${ScheduleEvent.formatMinutes(event.startMinutes)}–${ScheduleEvent.formatMinutes(event.endMinutes)}'
+                      '${category == null ? '' : '  ·  ${category!.name}'}',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
                       ),

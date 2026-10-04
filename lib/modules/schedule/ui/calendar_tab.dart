@@ -1,14 +1,23 @@
 import 'package:flutter/material.dart';
 import '../../../core/design/design_system.dart';
+import '../models/category.dart';
 import '../models/schedule_event.dart';
+import '../schedule_category_repository.dart';
 import '../schedule_repository.dart';
+import 'category_visuals.dart';
 import 'event_form_screen.dart';
 import 'event_tile.dart';
 
 /// Вкладка «Календарь»: выбор даты + события выбранного дня.
 class CalendarTab extends StatefulWidget {
-  const CalendarTab({super.key, required this.repository});
+  const CalendarTab({
+    super.key,
+    required this.repository,
+    required this.categoryRepository,
+  });
+
   final ScheduleRepository repository;
+  final ScheduleCategoryRepository categoryRepository;
 
   @override
   State<CalendarTab> createState() => _CalendarTabState();
@@ -17,6 +26,7 @@ class CalendarTab extends StatefulWidget {
 class _CalendarTabState extends State<CalendarTab> {
   DateTime _selectedDate = DateTime.now();
   late Future<List<ScheduleEvent>> _future;
+  List<Category> _categories = const <Category>[];
 
   @override
   void initState() {
@@ -26,6 +36,13 @@ class _CalendarTabState extends State<CalendarTab> {
 
   void _reload() {
     _future = widget.repository.getForDate(_selectedDate);
+    _loadCategories();
+  }
+
+  Future<void> _loadCategories() async {
+    final categories = await widget.categoryRepository.getAll();
+    if (!mounted) return;
+    setState(() => _categories = categories);
   }
 
   Future<void> _openEvent(ScheduleEvent? event) async {
@@ -33,6 +50,7 @@ class _CalendarTabState extends State<CalendarTab> {
       MaterialPageRoute(
         builder: (_) => EventFormScreen(
           repository: widget.repository,
+          categoryRepository: widget.categoryRepository,
           existing: event,
           initialDate: _selectedDate,
         ),
@@ -75,10 +93,15 @@ class _CalendarTabState extends State<CalendarTab> {
                   title: 'Событий в этот день нет',
                 );
               }
+              final resolver = CategoryResolver.of(_categories);
               return ListView(
                 padding: AppInsets.md,
                 children: events
-                    .map((e) => EventTile(event: e, onTap: () => _openEvent(e)))
+                    .map((e) => EventTile(
+                          event: e,
+                          category: resolver.resolve(e),
+                          onTap: () => _openEvent(e),
+                        ))
                     .toList(),
               );
             },

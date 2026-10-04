@@ -5,6 +5,7 @@ import 'package:personal_hub/core/modules/module_state.dart';
 import 'package:personal_hub/core/modules/module_storage.dart';
 import 'package:personal_hub/core/search/global_search_service.dart';
 import 'package:personal_hub/modules/schedule/models/schedule_event.dart';
+import 'package:personal_hub/modules/schedule/schedule_category_repository.dart';
 import 'package:personal_hub/modules/schedule/schedule_module.dart';
 import 'package:personal_hub/modules/schedule/schedule_repository.dart';
 import 'package:personal_hub/modules/schedule/schedule_search_provider.dart';
@@ -33,6 +34,7 @@ ScheduleEvent _event({
   String id = 'e1',
   String title = 'Встреча',
   String category = 'Работа',
+  String? categoryId,
   EventPriority priority = EventPriority.medium,
   DateTime? date,
   int startMinutes = 9 * 60,
@@ -44,6 +46,7 @@ ScheduleEvent _event({
     id: id,
     title: title,
     category: category,
+    categoryId: categoryId,
     priority: priority,
     date: date ?? DateTime(2026, 1, 15),
     startMinutes: startMinutes,
@@ -104,6 +107,75 @@ void main() {
     });
   });
 
+  group('Ссылка на категорию — round-trip через хранилище', () {
+    late _FakeModuleStorage storage;
+    late ScheduleRepository repository;
+
+    setUp(() {
+      storage = _FakeModuleStorage();
+      repository = ScheduleRepository(storage);
+    });
+
+    test('событие со categoryId сохраняется и читается обратно', () async {
+      await repository.add(_event(categoryId: 'cat-7'));
+
+      final all = await repository.getAll();
+
+      expect(all, hasLength(1));
+      expect(all.single.categoryId, 'cat-7');
+      // Устаревшая строка сохраняется рядом и тоже доезжает.
+      expect(all.single.category, 'Работа');
+    });
+
+    test('событие без категории читается с categoryId == null', () async {
+      await repository.add(_event(category: ''));
+
+      final all = await repository.getAll();
+
+      expect(all.single.categoryId, isNull);
+      expect(all.single.category, '');
+    });
+
+    test('старая запись без ключа categoryId читается как «без категории»',
+        () async {
+      // Ровно то, что лежит в хранилище до Этапа 7.1: category есть,
+      // categoryId нет. Миграции ещё нет, и она не нужна, чтобы такое
+      // событие просто загрузилось.
+      await storage.setString(
+        'event:legacy',
+        '{"id":"legacy","title":"Старое","category":"Работа",'
+        '"priority":"medium","date":"2026-01-15","startMinutes":540,'
+        '"endMinutes":600,"status":"planned","note":""}',
+      );
+
+      final all = await repository.getAll();
+
+      expect(all, hasLength(1));
+      expect(all.single.id, 'legacy');
+      expect(all.single.categoryId, isNull);
+      expect(all.single.category, 'Работа');
+    });
+
+    test('битая запись без ключа category больше не роняет чтение модуля',
+        () async {
+      // Раньше `json['category'] as String` уронил бы здесь getAll(), а
+      // вместе с ним весь модуль: одно негодное значение — и не видно
+      // ни одного события.
+      await storage.setString(
+        'event:old',
+        '{"id":"old","title":"Старое","priority":"medium",'
+        '"date":"2026-01-15","startMinutes":540,"endMinutes":600,'
+        '"status":"planned","note":""}',
+      );
+      await repository.add(_event(id: 'fresh', title: 'Новое'));
+
+      final all = await repository.getAll();
+
+      expect(all.map((e) => e.id), containsAll(<String>['old', 'fresh']));
+      expect(all.firstWhere((e) => e.id == 'old').category, '');
+    });
+  });
+
   group('ScheduleDaySummary', () {
     test('считает занятое и свободное время', () {
       final events = [
@@ -131,7 +203,10 @@ void main() {
     setUp(() async {
       storage = _FakeModuleStorage();
       repository = ScheduleRepository(storage);
-      provider = ScheduleSearchProvider(repository);
+      provider = ScheduleSearchProvider(
+        repository,
+        ScheduleCategoryRepository(storage),
+      );
       await repository.add(_event(
         title: 'Встреча с клиентом',
         category: 'Работа',

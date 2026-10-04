@@ -1,15 +1,24 @@
 import 'package:flutter/material.dart';
 import '../../../core/design/design_system.dart';
+import '../models/category.dart';
 import '../models/schedule_event.dart';
+import '../schedule_category_repository.dart';
 import '../schedule_repository.dart';
+import 'category_visuals.dart';
 import 'event_form_screen.dart';
 import 'event_tile.dart';
 
 /// Вкладка «Сегодня»: список событий сегодняшнего дня, свободное время
 /// и суммарная занятость.
 class TodayTab extends StatefulWidget {
-  const TodayTab({super.key, required this.repository});
+  const TodayTab({
+    super.key,
+    required this.repository,
+    required this.categoryRepository,
+  });
+
   final ScheduleRepository repository;
+  final ScheduleCategoryRepository categoryRepository;
 
   @override
   State<TodayTab> createState() => _TodayTabState();
@@ -17,6 +26,7 @@ class TodayTab extends StatefulWidget {
 
 class _TodayTabState extends State<TodayTab> {
   late Future<List<ScheduleEvent>> _future;
+  List<Category> _categories = const <Category>[];
 
   @override
   void initState() {
@@ -26,6 +36,18 @@ class _TodayTabState extends State<TodayTab> {
 
   void _reload() {
     _future = widget.repository.getForDate(DateTime.now());
+    _loadCategories();
+  }
+
+  /// Читает категории для показа. Отдельная загрузка от событий
+  /// намеренна: события дня и категории меняются в разные моменты
+  /// (категорию можно переименовать из соседней вкладки), и связывать
+  /// их одним Future означало бы ждать оба чтения, чтобы показать
+  /// список дня.
+  Future<void> _loadCategories() async {
+    final categories = await widget.categoryRepository.getAll();
+    if (!mounted) return;
+    setState(() => _categories = categories);
   }
 
   Future<void> _openEvent(ScheduleEvent? event) async {
@@ -33,6 +55,7 @@ class _TodayTabState extends State<TodayTab> {
       MaterialPageRoute(
         builder: (_) => EventFormScreen(
           repository: widget.repository,
+          categoryRepository: widget.categoryRepository,
           existing: event,
           initialDate: DateTime.now(),
         ),
@@ -52,6 +75,7 @@ class _TodayTabState extends State<TodayTab> {
 
         final events = snapshot.data!;
         final summary = ScheduleDaySummary.fromEvents(events);
+        final resolver = CategoryResolver.of(_categories);
 
         return RefreshIndicator(
           onRefresh: () async => setState(_reload),
@@ -91,6 +115,7 @@ class _TodayTabState extends State<TodayTab> {
               else
                 ...events.map((e) => EventTile(
                       event: e,
+                      category: resolver.resolve(e),
                       onTap: () => _openEvent(e),
                     )),
             ],

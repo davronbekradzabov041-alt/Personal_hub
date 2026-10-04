@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
-import '../../../core/design/design_system.dart';
 import '../../../core/modules/module_manager_scope.dart';
-import 'event_form_screen.dart';
+import '../schedule_category_repository.dart';
 import '../schedule_repository.dart';
 import 'calendar_tab.dart';
+import 'category_form_screen.dart';
+import 'category_list_view.dart';
+import 'event_form_screen.dart';
 import 'today_tab.dart';
 
 /// Главный экран Schedule.
@@ -14,6 +16,11 @@ import 'today_tab.dart';
 /// не тянуть за собой раннюю реализацию ModuleManager — вместо этого
 /// каждая страница модуля сама достаёт его из Scope.
 /// AppBar предоставляется AppShell. TabBar перенесён в body.
+///
+/// Категории — третья вкладка, а не отдельный экран: ими пользуются
+/// нечасто, но выбирают в них постоянно (каждый раз, когда у события
+/// меняется категория), и прятать их за кнопку в AppBar означало бы
+/// лишний шаг на каждом таком выборе.
 class ScheduleScreen extends StatefulWidget {
   const ScheduleScreen({super.key, required this.moduleId});
   final String moduleId;
@@ -26,11 +33,17 @@ class _ScheduleScreenState extends State<ScheduleScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
   ScheduleRepository? _repository;
+  ScheduleCategoryRepository? _categoryRepository;
+
+  /// Меняется, когда категория создана кнопкой на экране: список
+  /// категорий живёт в своём State и не видит нажатий этого экрана.
+  /// Тот же приём с сигналом, что у Home-секции Schedule.
+  final ValueNotifier<int> _categorySignal = ValueNotifier<int>(0);
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
   }
 
   @override
@@ -43,11 +56,13 @@ class _ScheduleScreenState extends State<ScheduleScreen>
     // объекта на каждую перерисовку без всякой пользы.
     final api = ModuleManagerScope.of(context).apiFor(widget.moduleId);
     _repository = ScheduleRepository(api.storage);
+    _categoryRepository = ScheduleCategoryRepository(api.storage);
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    _categorySignal.dispose();
     super.dispose();
   }
 
@@ -56,7 +71,10 @@ class _ScheduleScreenState extends State<ScheduleScreen>
   Future<void> _addEvent() async {
     await Navigator.of(context).push<bool>(
       MaterialPageRoute(
-        builder: (_) => EventFormScreen(repository: _repository!),
+        builder: (_) => EventFormScreen(
+          repository: _repository!,
+          categoryRepository: _categoryRepository!,
+        ),
       ),
     );
     // TodayTab/CalendarTab перечитывают данные в initState() — простого
@@ -69,9 +87,21 @@ class _ScheduleScreenState extends State<ScheduleScreen>
     if (mounted) setState(() => _refreshTick++);
   }
 
+  /// Создание категории с вкладки: форма открывается поверх экрана, а
+  /// список вкладки узнаёт об изменении через сигнал.
+  Future<void> _addCategory() async {
+    final created = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => CategoryFormScreen(repository: _categoryRepository!),
+      ),
+    );
+    if (created == true) _categorySignal.value++;
+  }
+
   @override
   Widget build(BuildContext context) {
     final repository = _repository!;
+    final categoryRepository = _categoryRepository!;
 
     return Scaffold(
       body: NestedScrollView(
@@ -87,6 +117,7 @@ class _ScheduleScreenState extends State<ScheduleScreen>
               tabs: const [
                 Tab(text: 'Сегодня'),
                 Tab(text: 'Календарь'),
+                Tab(text: 'Категории'),
               ],
             ),
           ),
@@ -94,15 +125,44 @@ class _ScheduleScreenState extends State<ScheduleScreen>
         body: TabBarView(
           controller: _tabController,
           children: [
-            TodayTab(key: ValueKey('today-$_refreshTick'), repository: repository),
-            CalendarTab(key: ValueKey('calendar-$_refreshTick'), repository: repository),
+            TodayTab(
+              key: ValueKey('today-$_refreshTick'),
+              repository: repository,
+              categoryRepository: categoryRepository,
+            ),
+            CalendarTab(
+              key: ValueKey('calendar-$_refreshTick'),
+              repository: repository,
+              categoryRepository: categoryRepository,
+            ),
+            CategoryListView(
+              key: ValueKey('categories-$_refreshTick'),
+              repository: categoryRepository,
+              refreshSignal: _categorySignal,
+              onCreateRequested: _addCategory,
+            ),
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _addEvent,
-        tooltip: 'Добавить событие',
-        child: const Icon(Icons.add),
+      floatingActionButton: AnimatedBuilder(
+        animation: _tabController,
+        builder: (context, child) {
+          // На вкладке категорий FAB создаёт КАТЕГОРИЮ, а не событие:
+          // одна кнопка с двумя смыслами в разных вкладках — источник
+          // ошибок, а стоимость второго FAB равна нулю.
+          if (_tabController.index == 2) {
+            return FloatingActionButton(
+              onPressed: _addCategory,
+              tooltip: 'Создать категорию',
+              child: const Icon(Icons.create_new_folder_outlined),
+            );
+          }
+          return FloatingActionButton(
+            onPressed: _addEvent,
+            tooltip: 'Добавить событие',
+            child: const Icon(Icons.add),
+          );
+        },
       ),
     );
   }

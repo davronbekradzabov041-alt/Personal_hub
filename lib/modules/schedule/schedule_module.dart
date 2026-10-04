@@ -4,6 +4,8 @@ import '../../core/modules/module.dart';
 import '../../core/modules/module_api.dart';
 import '../../core/modules/module_manifest.dart';
 import '../../core/modules/module_permission.dart';
+import 'schedule_category_repository.dart';
+import 'schedule_migrator.dart';
 import 'schedule_repository.dart';
 import 'schedule_search_provider.dart';
 import 'ui/home/schedule_home_section.dart';
@@ -54,8 +56,53 @@ class ScheduleModule extends Module {
   static const int _homeSectionOrder = 10;
 
   @override
+  Future<void> onInstall(ModuleApi api) async {
+    await _migrateStorage(api);
+  }
+
+  /// Переносит старые строковые категории событий в Category
+  /// (Этап 7.2).
+  ///
+  /// ## Почему onInstall, а не onEnable
+  ///
+  /// onInstall вызывается на КАЖДОМ холодном старте: ModuleStateRestorer
+  /// повторяет install() → enable() для состояния, восстановленного из
+  /// хранилища. update() хуки заново не зовёт, а ручной вызов миграции
+  /// из UI означал бы, что есть путь входа, где про неё забыли.
+  /// Плата — один [ScheduleMigrator] и чтение одного ключа маркера на
+  /// запуск модуля.
+  ///
+  /// ## Почему исключения перехватываются
+  ///
+  /// ModuleManager на ошибке в onInstall откатывает установку и стирает
+  /// хранилище модуля целиком (_rollbackFailedInstall). Неудачная
+  /// миграция не имеет права стоить пользователю всех событий, поэтому
+  /// падение превращается в запись в лог. Маркер при этом не пишется,
+  /// и следующий запуск повторяет миграцию с того же места.
+  Future<void> _migrateStorage(ModuleApi api) async {
+    try {
+      final result = await ScheduleMigrator(api.storage).run();
+      if (!result.ran) return;
+
+      debugPrint(
+        'Schedule: хранилище мигрировано '
+        '(${result.previousVersion ?? 'без версии'} → '
+        '${ScheduleMigrator.currentSchemaVersion}): '
+        'создано категорий ${result.createdCategories}, '
+        'привязано событий ${result.linkedEvents}, '
+        'снято висячих ссылок ${result.detachedEvents}',
+      );
+    } catch (error, stack) {
+      debugPrint('Schedule: миграция хранилища не завершена: $error\n$stack');
+    }
+  }
+
+  @override
   Future<void> onEnable(ModuleApi api) async {
-    final provider = ScheduleSearchProvider(ScheduleRepository(api.storage));
+    final provider = ScheduleSearchProvider(
+      ScheduleRepository(api.storage),
+      ScheduleCategoryRepository(api.storage),
+    );
     _searchProvider = provider;
     api.registerSearchProvider(provider);
   }

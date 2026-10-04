@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import '../../../../core/design/design_system.dart';
 import '../../../../core/modules/module_manager_scope.dart';
 import '../../../../core/navigation/app_routes.dart';
+import '../../models/category.dart';
 import '../../models/schedule_event.dart';
+import '../../schedule_category_repository.dart';
 import '../../schedule_repository.dart';
+import '../category_visuals.dart';
 import '../event_form_screen.dart';
 import 'timeline_strip.dart';
 import 'today_hero.dart';
@@ -49,7 +52,9 @@ class _ScheduleHomeSectionState extends State<ScheduleHomeSection> {
   // присваиванием здесь падал бы с LateInitializationError на любой
   // смене темы (та же причина, что и на HomeScreen в AUD-02).
   ScheduleRepository? _repository;
+  ScheduleCategoryRepository? _categoryRepository;
   List<ScheduleEvent> _events = <ScheduleEvent>[];
+  List<Category> _categories = <Category>[];
   ScheduleDaySummary? _daySummary;
   bool _loading = true;
 
@@ -84,18 +89,27 @@ class _ScheduleHomeSectionState extends State<ScheduleHomeSection> {
 
     final api = ModuleManagerScope.of(context).apiFor(widget.moduleId);
     _repository = ScheduleRepository(api.storage);
+    _categoryRepository = ScheduleCategoryRepository(api.storage);
     _loadTodayData();
   }
 
   /// Повторное чтение дня: и при первом построении, и при обновлении.
+  ///
+  /// Категории читаются здесь же, а не остаются от прошлой загрузки:
+  /// переименование категории с другого экрана обязано менять то, что
+  /// видно на главном, иначе главный экран показывал бы имя, которого
+  /// у пользователя уже нет.
   Future<void> _loadTodayData() async {
     final repository = _repository;
-    if (repository == null) return;
+    final categoryRepository = _categoryRepository;
+    if (repository == null || categoryRepository == null) return;
 
     final events = await repository.getForDate(DateTime.now());
+    final categories = await categoryRepository.getAll();
     if (!mounted) return;
     setState(() {
       _events = events;
+      _categories = categories;
       _daySummary = ScheduleDaySummary.fromEvents(events);
       _loading = false;
     });
@@ -103,12 +117,14 @@ class _ScheduleHomeSectionState extends State<ScheduleHomeSection> {
 
   Future<void> _openEventForm(ScheduleEvent event) async {
     final repository = _repository;
-    if (repository == null) return;
+    final categoryRepository = _categoryRepository;
+    if (repository == null || categoryRepository == null) return;
 
     final changed = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => EventFormScreen(
           repository: repository,
+          categoryRepository: categoryRepository,
           existing: event,
         ),
       ),
@@ -130,6 +146,7 @@ class _ScheduleHomeSectionState extends State<ScheduleHomeSection> {
 
     final now = DateTime.now();
     final currentMinutes = now.hour * 60 + now.minute;
+    final resolver = CategoryResolver.of(_categories);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -149,6 +166,7 @@ class _ScheduleHomeSectionState extends State<ScheduleHomeSection> {
           child: TimelineStrip(
             events: _events,
             currentMinutes: currentMinutes,
+            categoryResolver: resolver,
             onEventTap: _openEventForm,
           ),
         ),
@@ -160,6 +178,7 @@ class _ScheduleHomeSectionState extends State<ScheduleHomeSection> {
           ),
           child: UpcomingAgenda(
             events: _events,
+            categoryResolver: resolver,
             onNavigateToSchedule: _openSchedule,
             onEventTap: _openEventForm,
             maxItems: 3,
