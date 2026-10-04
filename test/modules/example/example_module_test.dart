@@ -118,14 +118,17 @@ void main() {
     expect(fresh.stateOf('example'), ModuleState.disabled);
   });
 
-  test('uninstall очищает состояние', () async {
+  test('uninstall очищает состояние и данные, но сохраняет tombstone', () async {
     await manager.install('example');
     await manager.enable('example');
     await manager.disable('example');
     await manager.uninstall('example');
     await _flush();
 
-    expect(await store.load('example'), isNull);
+    final saved = await store.load('example');
+    expect(saved, isNotNull);
+    expect(saved!.state, 'uninstalled');
+    expect(saved.enabled, isFalse);
   });
 
   test('повторная установка восстанавливает работу', () async {

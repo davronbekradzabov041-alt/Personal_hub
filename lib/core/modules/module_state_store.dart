@@ -19,6 +19,26 @@ class ModuleStateSnapshot {
     required this.installedAt,
     required this.updatedAt,
   });
+
+  Map<String, dynamic> toJson() => {
+    'moduleId': moduleId,
+    'state': state,
+    'installedVersion': installedVersion,
+    'enabled': enabled,
+    'installedAt': installedAt.toIso8601String(),
+    'updatedAt': updatedAt.toIso8601String(),
+  };
+
+  factory ModuleStateSnapshot.fromJson(Map<String, dynamic> json) {
+    return ModuleStateSnapshot(
+      moduleId: json['moduleId'] as String,
+      state: json['state'] as String,
+      installedVersion: json['installedVersion'] as String,
+      enabled: json['enabled'] as bool,
+      installedAt: DateTime.parse(json['installedAt'] as String),
+      updatedAt: DateTime.parse(json['updatedAt'] as String),
+    );
+  }
 }
 
 /// Контракт постоянного хранилища состояния модулей.

@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import '../../core/modules/home_section.dart';
 import '../../core/modules/module.dart';
 import '../../core/modules/module_api.dart';
 import '../../core/modules/module_manifest.dart';
 import '../../core/modules/module_permission.dart';
 import 'schedule_repository.dart';
 import 'schedule_search_provider.dart';
+import 'ui/home/schedule_home_section.dart';
 import 'ui/schedule_screen.dart';
 
 /// Первый полноценный функциональный модуль — Schedule.
@@ -39,6 +41,18 @@ class ScheduleModule extends Module {
 
   ScheduleSearchProvider? _searchProvider;
 
+  /// Счётчик обновления Home-секции.
+  ///
+  /// Принадлежит ЭТОМУ экземпляру модуля, а не статике: на каждый
+  /// зарегистрированный модуль — свой сигнал. Ядро дёргает
+  /// `HomeSection.onRefresh`, а секция ловит изменение здесь и
+  /// перечитывает день, поэтому refresh доходит до её State без
+  /// GlobalKey и без второго реестра.
+  final ValueNotifier<int> _homeRefreshSignal = ValueNotifier<int>(0);
+
+  /// Порядок секции на главном экране. Меньше — выше.
+  static const int _homeSectionOrder = 10;
+
   @override
   Future<void> onEnable(ModuleApi api) async {
     final provider = ScheduleSearchProvider(ScheduleRepository(api.storage));
@@ -70,4 +84,23 @@ class ScheduleModule extends Module {
 
   @override
   Widget buildPage(BuildContext context) => ScheduleScreen(moduleId: id);
+
+  /// Секция главного экрана: сегодняшнее расписание, шкала дня и
+  /// ближайшие дела.
+  ///
+  /// Ядро не знает, что внутри: оно получает `Widget` и обновляет
+  /// секцию через [HomeSection.onRefresh]. Ни репозиторий, ни модели,
+  /// ни экраны модуля за пределы Schedule не выходят.
+  @override
+  List<HomeSection> get homeSections => <HomeSection>[
+        HomeSection(
+          moduleId: id,
+          order: _homeSectionOrder,
+          builder: (context) => ScheduleHomeSection(
+            moduleId: id,
+            refreshSignal: _homeRefreshSignal,
+          ),
+          onRefresh: () async => _homeRefreshSignal.value++,
+        ),
+      ];
 }

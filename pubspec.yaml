@@ -19,6 +19,17 @@ dependencies:
   path_provider: ^2.1.1
   google_fonts: ^8.2.1
 
+  # --- Module Platform Stage 2 ---
+  path: ^1.9.0
+  meta: ^1.12.0
+
+  # --- Module Platform Stage 5: Import/Export UI ---
+  file_picker: ^8.0.0
+
+  # --- Stage 6: Backup/Restore ---
+  # SHA-256 для контрольных сумм содержимого архивов .pbk/.pmb.
+  crypto: ^3.0.7
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

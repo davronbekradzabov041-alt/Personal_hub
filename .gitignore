@@ -18,10 +18,9 @@ migrate_working_dir/
 *.iws
 .idea/
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
+# The .vscode folder holds machine-local IDE settings in this project, so it is
+# not tracked.
+.vscode/
 
 # Flutter/Dart/Pub related
 **/doc/api/
@@ -46,3 +45,9 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Kilo local agent infrastructure (nothing under .kilo is tracked)
+.kilo/worktrees/
+.kilo/agent-manager.json
+.kilo/agents/
+.kilo/kilo.jsonc

@@ -11,6 +11,7 @@ import 'module_manifest.dart';
 import 'module_permission.dart';
 import 'module_registry.dart';
 import 'module_state.dart';
+import 'module_state_store.dart';
 import 'module_storage.dart';
 import 'module_storage_isar.dart';
 
@@ -75,6 +76,14 @@ class ModuleManager extends ChangeNotifier {
 
   /// Снимок состояний всех модулей, когда-либо тронутых менеджером.
   Map<String, ModuleState> get states => Map.unmodifiable(_states);
+
+  /// Тестовый метод: устанавливает состояние модуля напрямую без Isar.
+  /// Только для тестов! Не использовать в продакшн-коде.
+  @visibleForTesting
+  void setStateForTesting(String moduleId, ModuleState state) {
+    _states[moduleId] = state;
+    notifyListeners();
+  }
 
   // --- Жизненный цикл ---
 
@@ -294,6 +303,117 @@ class ModuleManager extends ChangeNotifier {
     // как было — update не должен незаметно "включать" или
     // "выключать" модуль. Хуки onInstall/onEnable заново не зовутся.
     notifyListeners();
+  }
+
+  // --- Восстановление состояния из внешнего источника ---
+
+  /// Принимает состояние, восстановленное из внешнего источника (архив
+  /// `.pmb`), как АВТОРИТЕТНОЕ состояние модуля.
+  ///
+  /// Зачем отдельный вход, если есть install/enable/disable: переход
+  /// `enabled → installed` невыразим через них. uninstall() + install()
+  /// стёрли бы только что восстановленные данные (uninstall отдаёт
+  /// tombstone, на который ModuleStatePersistence реагирует очисткой
+  /// всех данных модуля), а «молча выставить installed» без хуков
+  /// оставило бы активный модуль активным: его SearchProvider остался бы
+  /// зарегистрированным в GlobalSearchService при состоянии «не активен».
+  ///
+  /// Отсюда семантика: ось «активен / не активен» проходит через
+  /// настоящие lifecycle-хуки (onEnable/onDisable), а уже ПОСЛЕ них
+  /// переносится точное состояние из снимка. Поэтому результат — одна
+  /// транзакция с одним notifyListeners(), а не цепочка промежуточных
+  /// состояний.
+  ///
+  /// Источник истины остаётся один: состояние живёт в [_states], а
+  /// ModuleStatePersistence расходится по нему сам, услышав
+  /// notifyListeners(). Метод не пишет в ModuleStateStore напрямую —
+  /// иначе получилось бы ровно то рассогласование, которое он и
+  /// устраняет.
+  ///
+  /// Отклоняет (ModuleLifecycleError):
+  ///
+  /// * пустой moduleId;
+  /// * модуль, которого нет в ModuleRegistry — восстановление состояния
+  ///   не оживляет модуль, это делает install();
+  /// * неизвестное имя состояния;
+  /// * `uninstalled` — это только результат uninstall(). Принять его
+  ///   здесь значило бы записать tombstone и стереть данные модуля,
+  ///   тогда как .pmb restore восстанавливает данные, а не удаляет их;
+  /// * модуль, который сейчас не установлен (состояния нет или оно
+  ///   uninstalled) — принять для него состояние значило бы выполнить
+  ///   переход, которого не было.
+  ///
+  /// Повторное принятие уже текущего состояния — не ошибка и не
+  /// уведомление: ничего не меняется.
+  Future<void> adoptRestoredState(ModuleStateSnapshot snapshot) async {
+    final moduleId = snapshot.moduleId;
+
+    if (moduleId.trim().isEmpty) {
+      throw ModuleLifecycleError(
+        moduleId,
+        'нельзя принять состояние модуля с пустым id',
+      );
+    }
+
+    final module = _requireRegistered(moduleId);
+
+    final target = _parseState(snapshot.state);
+    if (target == null) {
+      throw ModuleLifecycleError(
+        moduleId,
+        'неизвестное состояние "${snapshot.state}"',
+      );
+    }
+
+    if (target == ModuleState.uninstalled) {
+      throw ModuleLifecycleError(
+        moduleId,
+        'восстановление не может вернуть модуль в uninstalled — '
+        'это состояние только uninstall(), иначе данные модуля будут стёрты',
+      );
+    }
+
+    final current = _states[moduleId];
+    if (current == null || current == ModuleState.uninstalled) {
+      throw ModuleLifecycleError(
+        moduleId,
+        'нельзя принять восстановленное состояние для неустановленного модуля',
+      );
+    }
+
+    if (current == target) return;
+
+    if (current != ModuleState.enabled && target == ModuleState.enabled) {
+      // installed/disabled → enabled: обычный lifecycle целиком,
+      // включая его собственные проверки и откат при ошибке onEnable.
+      await enable(moduleId);
+      return;
+    }
+
+    if (current == ModuleState.enabled && target != ModuleState.enabled) {
+      // enabled → installed/disabled: onDisable обязателен, иначе
+      // SearchProvider модуля останется в GlobalSearchService, а
+      // состояние скажет, что модуль не активен. Если хук бросит
+      // исключение, состояние не меняется вовсе.
+      await module.onDisable(_apiFor(module));
+    }
+
+    // enabled → installed и installed ↔ disabled: модуль и до, и после
+    // перехода не активен, хуков нет — меняется только пометка.
+    _states[moduleId] = target;
+    notifyListeners();
+  }
+
+  /// Имя состояния → ModuleState, либо null, если такого имени нет.
+  ///
+  /// Строгое сравнение с [ModuleState.name] — тем же контрактом, которым
+  /// состояние записывается в хранилище (ModuleState.name) и читается
+  /// обратно (ModuleStateRestorer).
+  static ModuleState? _parseState(String value) {
+    for (final state in ModuleState.values) {
+      if (state.name == value) return state;
+    }
+    return null;
   }
 
   // --- Внутренние проверки ---

@@ -24,4 +24,9 @@ class AppSettings {
   /// Пока используется только как сохранённое предпочтение —
   /// полноценная локализация строк не входит в Этап 4.
   String language = 'ru';
+
+  Map<String, dynamic> toJson() => {
+    'themeMode': themeMode,
+    'language': language,
+  };
 }

@@ -1,9 +1,251 @@
-# Personal Hub — Этап 1: Ядро
+# Personal Hub
 
-Flutter + Material 3. Локальное офлайн-приложение,
+Flutter + Material 3. Локальное офлайн-приложение для Android,
 модульная архитектура.
 
-## Структура проекта
+Этот файл исторический и построен как хроника по этапам: ниже
+сохранены разделы «Этап 1» … «Этап 14» в том виде, в каком они были
+написаны. **Актуальное состояние проекта** описано в следующем
+разделе и в `PROJECT_MAP.md`; при расхождении верьте им, а не
+историческим разделам.
+
+## Актуальное состояние проекта
+
+Ниже перечислено то, что подтверждается кодом в рабочем дереве.
+Состояние коммитов: HEAD `d453d52` от 2026-09-23 («Stage 3.6D
+phases 1–3»). Всё, что относится к Module Platform, Import/Export,
+Backup и HomeSection, на момент этого документа существует **в
+рабочем дереве и не закоммичено**.
+
+### Нумерация этапов
+
+В проекте сосуществуют две шкалы, и их нельзя путать:
+
+- **«Этап 1» … «Этап 14»** — старая роадмап-нумерация, по ней
+  написаны исторические разделы этого README и `CHANGELOG.md`.
+- **«Stage 2 / Stage 5 / Stage 6 / Stage 3.6D»** — новая
+  нумерация, которая используется в комментариях кода, в
+  `pubspec.yaml` и в аудитах (`lib/core/backup/backup.dart`:
+  «Stage 6B, 6C, 6D»; `lib/core/modules/platform/platform.dart`:
+  «Stage 1, 2, 3 & 4»; `pubspec.yaml`: «Stage 5: Import/Export UI»,
+  «Stage 6: Backup/Restore»).
+
+### Module Platform
+
+`lib/core/modules/platform/` (барrel `platform.dart`) — изолированный
+слой ввода-вывода для пакетов модулей. По собственному
+документированию библиотеки он **не зависит** от `ModuleManager`,
+`ModuleRegistry` и любой более высокой инфраструктуры модулей.
+
+- **package I/O** — `package_reader.dart` / `package_writer.dart`:
+  чтение и запись `.phm` (Personal Hub Module) как ZIP-архива;
+  `package_content.dart` — `PackageContent`, `PackageAsset`,
+  `PackageDataFile`.
+- **security guard** — `package_security_guard.dart`:
+  `validateArchive()` проверяет пути (в т.ч. `..`), структуру
+  верхнего уровня (разрешены `manifest.json`, `assets/`, `data/`,
+  `README.md`) и расширения файлов.
+- **песочница** — `module_sandbox.dart`: каталог модуля в
+  app-support (`getModuleRoot`, `getAssetsDirectory`,
+  `ensureModuleDirectories`, `exists`, `deleteModule`,
+  `listModuleIds`) плюс `validateModuleId()`.
+- **сериализация хранилища** — `module_storage_serializer.dart`:
+  `serialize()` / `deserialize()` с проверкой версии формата и
+  `moduleId`, с откатом исходных ключей при ошибке.
+- **импорт/экспорт** — `module_importer.dart`
+  (`importFromBytes()` → временная песочница → извлечение →
+  `_commitSandbox()`, откат при сбое) и `module_exporter.dart`
+  (`export()`), с типизированными исходами `ModuleImportOutcome` /
+  `ModuleExportOutcome`.
+- **исключения** — `importer_exceptions.dart`,
+  `package_exceptions.dart`, `sandbox_exceptions.dart`,
+  `serializer_exceptions.dart`.
+
+### Module lifecycle, состояние и персистентность
+
+- **Жизненный цикл** — `lib/core/modules/module_manager.dart`:
+  `install()`, `tryInstall()` → `ModuleInstallResult`, `enable()`,
+  `disable()`, `uninstall()`, `update()`, `isInstalled()`,
+  `isEnabled()`, `stateOf()`, `apiFor()`. При установке проверяются
+  формат версии, совместимость `apiVersion`, невыполненные
+  зависимости и циклы (`_dependencyCycles`), а неудачная установка
+  откатывается (`_rollbackFailedInstall`).
+- **Контракт модуля** — `lib/core/modules/module.dart`: `manifest`,
+  `id`/`title` из манифеста, `order`, `buildPage()`, хуки
+  `onInstall`/`onEnable`/`onDisable`/`onUninstall`, `homeSections`.
+- **Точка входа модуля в ядро** — `module_api.dart`: изолированное
+  хранилище (`ModuleStorage`) и регистрация/снятие `SearchProvider`;
+  конкретная реализация `ModuleApi` живёт в `ModuleManager`
+  (Этап 8), контракт не изменился.
+- **Состояние** — `module_state.dart` (`installed`/`enabled`/
+  `disabled`/`uninstalled`), `module_state_store.dart`
+  (`loadAll`/`load`/`save`/`delete` снимков), синхронизация с
+  Isar в обе стороны (`module_state_persistence.dart`, включая
+  `flush()` и `runAndFlush()`), восстановление после запуска
+  (`module_state_restorer.dart`), доступ из дерева виджетов
+  (`module_state_persistence_scope.dart`).
+- **Изоляция хранилища** — `module_storage.dart` (контракт) +
+  `module_storage_isar.dart` (общая Isar-коллекция, изоляция по
+  `moduleId`); `ModuleStorage.keys()` возвращает только ключи
+  своего модуля.
+
+### Импорт/экспорт внешнего модуля (`.phm`)
+
+- Формат пакета: `manifest.json` + `assets/` + `data/` (+ `README.md`);
+  описан в `docs/external-module-format.md`, синхронизирован с
+  `ManifestValidator`/`ModuleManager`.
+- Приём и проверка: `lib/core/modules/external/manifest_parser.dart`,
+  `manifest_validator.dart`.
+- Мост в систему модулей без выполнения чужого кода:
+  `external_module_adapter.dart` (манифест → `Module`).
+- Каталог доступных модулей: `in_memory_module_catalog.dart`.
+- UI: экран `/modules` (`lib/ui/screens/modules_screen.dart`) и
+  секции в `lib/ui/widgets/module_store/` — «Доступные» /
+  «Установленные» / «Обновления», карточка модуля, общий
+  обработчик ошибок жизненного цикла.
+
+### Backup (Stage 6)
+
+Ядро — `lib/core/backup/` (барrel `backup.dart`: «Stage 6B, 6C,
+6D»). UI не зависит от core напрямую: операции описаны как
+интерфейс в `lib/ui/backup/backup_gateway.dart` и реализованы
+адаптером `core_backup_gateway.dart`.
+
+Состав архива: `manifest.json`, глобальные настройки и `metadata/`
+(`backupFormatVersion`, `appVersion`, `createdAt`, `checksum`),
+для каждого включённого модуля — `modules/<id>/` с манифестом,
+состоянием, данными и ассетами.
+
+Фактически доступные операции (`BackupGateway`):
+
+| Операция | Архив | Статус |
+|---|---|---|
+| `createGlobalBackup` | `.pbk` | реализована (все модули или выбранные) |
+| `inspectGlobalBackup` | `.pbk` | реализована (предпросмотр содержимого) |
+| `createModuleBackup` | `.pmb` | реализована |
+| `inspectModuleBackup` | `.pmb` | реализована |
+| `restoreModuleBackup` | `.pmb` | реализована |
+| **restore глобального `.pbk`** | `.pbk` | **не реализована** |
+
+**Ограничение:** глобальный `.pbk` можно создать и просмотреть, но
+восстановление глобального бэкапа в состояние приложения в коде
+**отсутствует** — `GlobalBackupManager` не имеет операций restore,
+в `BackupGateway` для них нет метода, а `core_backup_gateway.dart`
+прямо фиксирует, что этот пробел («6E») закрывать должна будущая
+стадия, а не UI-адаптер. Маршрут `.pmb` (бэкап одного модуля) —
+единственный работающий restore, включая откат при неудаче.
+
+Остальное подтверждено кодом: типизированный манифест
+(`backup_manifest.dart`), security guard
+(`backup_security_guard.dart` — проверка архива, запрет
+поддиректорий и неразрешённых расширений в `assets/`), опции
+(`backup_options.dart`, `module_backup_options.dart`), атомарная
+запись (`atomic_file_writer.dart`), откат при неудачном
+восстановлении, чтение архивов (`backup_reader.dart`,
+`module_backup_reader.dart`).
+
+UI: экран `lib/ui/screens/backup_screen.dart`, состояние операций
+(`lib/ui/backup/backup_operation_controller.dart`), выбор файла
+через `file_picker` (`backup_file_service.dart`), инлайн-сервисы
+(`backup_services_scope.dart`), читаемые сообщения об ошибках
+(`backup_error_presenter.dart`) и виджеты в
+`lib/ui/widgets/backup/` — секции глобального бэкапа, бэкапа
+модуля и restore, диалог подтверждения, баннер операции.
+
+### HomeSection (QUAL-03)
+
+Главный экран собирается из вкладов, которые модули отдают сами:
+
+```
+Core
+ └── HomeSection (lib/core/modules/home_section.dart) — общий контракт
+Module
+ └── Module.homeSections — модуль отдаёт свои секции
+Schedule
+ └── ScheduleHomeSection — реализация от Schedule
+HomeScreen
+ └── собирает секции включённых модулей
+```
+
+`HomeSection` — это `moduleId`, `order`, `builder` и необязательный
+`onRefresh`. Через контракт не проходит ни данных, ни моделей, ни
+типизированных колбэков модуля. `HomeScreen` показывает секцию
+только когда модуль находится в состоянии `enabled`
+(`ModuleManager.isEnabled`) и сортирует по `order`.
+
+Виджеты Schedule живут в модуле — `lib/modules/schedule/ui/home/`
+(`schedule_home_section.dart`, `today_hero.dart`,
+`timeline_strip.dart`, `upcoming_agenda.dart`). Общий
+`lib/ui/widgets/home/active_modules_canvas.dart` остаётся в `ui/`,
+потому что он не принадлежит Schedule.
+
+**Граница composition root.** Ядро не импортирует конкретные
+функциональные модули. Единственные разрешённые исключения —
+три файла, перечисленные в `test/ui/home_architecture_boundary_test.dart`:
+`lib/core/modules/module_bootstrap.dart`,
+`lib/core/navigation/app_routes.dart`,
+`lib/core/navigation/app_shell.dart`. Тот же тест проверяет, что
+`Schedule`-виджеты главного экрана лежат именно в
+`lib/modules/schedule/ui/home/`.
+
+### Навигация и экраны
+
+- `lib/core/navigation/app_shell.dart` — `AppShell`: адаптивная
+  навигация (в т.ч. `NavigationType.drawer`), `_TopContextBar`,
+  `_FloatingIslandDock`, `_RailSecondaryAction`. Это источник истины
+  для текущей навигации.
+- `lib/core/navigation/app_routes.dart` — таблица маршрутов
+  (`/`, `/settings`, `/search`, `/modules`, экран backup).
+- `lib/ui/screens/startup_error_screen.dart` — экран ошибки запуска:
+  показывается, когда инициализация до `runApp()` упала (например,
+  не открылся Isar), с идентификаторами для воспроизведения.
+- Боковое меню как отдельный виджет (`app_drawer.dart`) в
+  текущей архитектуре **отсутствует**: навигацию строит `AppShell`.
+  Виджет был удалён вместе с его упоминаниями в документации.
+
+### Текущий статус и roadmap
+
+Выполнено и подтверждено кодом: ядро с Isar, настройки, глобальный
+поиск, система модулей с полным жизненным циклом и персистентностью
+состояния, внешний формат модуля и Module Store, Module Platform
+(`.phm`), импорт/экспорт, Backup (`.pbk` создание/просмотр, `.pmb`
+создание/просмотр/восстановление), HomeSection-композиция
+главного экрана.
+
+Не сделано и не заявляется:
+
+- восстановление глобального `.pbk` не реализовано;
+- **Backup не является primary navigation destination.** Он не входит
+  ни в `_destinations` оболочки (вкладки), ни в `_secondaryDestinations`
+  (Поиск, Настройки). Экран открывается из раздела «Данные» настроек
+  по именованному маршруту: **Настройки → Данные → Резервные копии** →
+  `BackupScreen`. `AppRoutes.backup` — единственный production-путь к
+  этому экрану; `BackupScreen` не является ни отдельным разделом
+  навигации, ни функциональным модулем (реализация лежит в
+  `core/backup/`, экран обращается к ядру только через `BackupGateway`);
+- **полный QA после Project Cleanup ещё не выполнялся** — ни
+  `flutter analyze`, ни `flutter test`, ни release-сборка после
+  чистки не запускались, поэтому утверждения «все тесты проходят»
+  и «готово к релизу» здесь не делаются;
+- Stage 7 (Categories System) не начиналась;
+- remote-репозиторий у проекта отсутствует, публикация не
+  выполнялась.
+
+Последняя выполненная проверка относится к состоянию **до**
+Project Cleanup: `flutter analyze --no-fatal-infos` — 366 issues
+без новых, `flutter test` — 489 тестов пройдено, release APK собран.
+Это исторический факт, а не подтверждение текущего состояния.
+
+### Запуск локально
+
+```
+flutter pub get
+flutter pub run build_runner build --delete-conflicting-outputs
+flutter analyze
+flutter test
+```
+
+## Структура проекта (состояние на Этапе 1 — исторический раздел)
 
 ```
 lib/
@@ -69,14 +311,14 @@ modules/
     └── example_module.dart  # Демо-модуль — доказывает, что механизм работает
 
 ui/widgets/
-└── app_drawer.dart          # Боковое меню: Главная, Настройки + список модулей
+└── empty_state.dart           # Переиспользуемая "заглушка" для пустых разделов
 ```
 
 **Как это работает**: `main.dart` вызывает `registerCoreModules()`
-до `runApp()`. `AppDrawer` читает `ModuleRegistry.modules` и
-строит пункты меню динамически — ни ядро, ни меню не содержат
-названий конкретных модулей. Чтобы подключить/отключить модуль,
-достаточно добавить/убрать одну строку в `module_bootstrap.dart`.
+до `runApp()`. Навигация ядра строится динамически по
+`ModuleRegistry.modules` — ни ядро, ни меню не содержат названий
+конкретных модулей. Чтобы подключить/отключить модуль, достаточно
+добавить/убрать одну строку в `module_bootstrap.dart`.
 
 `ExampleModule` — не настоящий модуль, а доказательство того,
 что систему можно расширять независимо от ядра. Его можно
@@ -110,8 +352,7 @@ ui/screens/settings_screen.dart   # Заменил settings_placeholder_screen.d
 **Изменение архитектуры**: `settings_placeholder_screen.dart`
 удалён и заменён на `settings_screen.dart` — это ожидаемая
 замена заглушки на реальный экран, а не отход от структуры
-Этапа 1 (маршрут `AppRoutes.settings` и место в `AppDrawer`
-не изменились).
+Этапа 1 (маршрут `AppRoutes.settings` не изменился).
 
 ### core/search/ (добавлено на Этапе 5)
 
@@ -155,11 +396,14 @@ ui/screens/search_screen.dart   # Поле ввода + список резул�
   `modules/README.md`, объясняющая правило зависимостей на
   будущее.
 
-## Статус
+## Статус (историческая нумерация «Этап N»)
+
+Этот список относится к старой шкале этапов. Актуальное состояние —
+в разделе «Актуальное состояние проекта» выше.
 
 ✅ Этап 1: структура, тема, навигация, главный экран — готово
 ✅ Этап 2: Isar (модели, инициализация, Repository) — готово
-✅ Этап 3: система модулей + боковое меню — готово
+✅ Этап 3: система модулей — готово
 ✅ Этап 4: настройки приложения — готово
 ✅ Этап 5: глобальный поиск — готово
 
@@ -290,9 +534,9 @@ install (контракты для этого есть — `kCoreModuleApiVersio
 Состояние живёт только в памяти — подключить его сейчас означало бы,
 что после каждого перезапуска все модули (включая `ExampleModule`)
 считались бы неустановленными, а поведение приложения не изменилось
-бы, потому что `AppDrawer` по-прежнему читает `ModuleRegistry.modules`
+бы, потому что навигация по-прежнему читает `ModuleRegistry.modules`
 напрямую, без учёта состояния. Осмысленная интеграция — после Этапа 9
-(персистентность состояния) и, вероятно, правки `AppDrawer`
+(персистентность состояния) и, вероятно, правки навигации
 (Этап 10/12), а не раньше.
 
 **Проверки:** Flutter/Dart SDK недоступен — `dart analyze`/`flutter
@@ -464,8 +708,8 @@ ModuleManager (состояние) ⇄ ModuleStatePersistence ⇄ Isar (Этап
    `GlobalSearchService` (требует `ModulePermission.coreSearch` в
    манифесте — иначе `ModuleApi.registerSearchProvider` бросил бы
    `ModuleLifecycleError`).
-3. Пользователь открывает страницу модуля (через `AppDrawer`, не
-   менялся) — страница сама показывает текущее состояние
+3. Пользователь открывает страницу модуля через навигацию —
+   страница сама показывает текущее состояние
    (`ModuleManagerScope.of(context).stateOf('example')`) и кнопки
    Установить/Включить/Выключить/Удалить, актуальные для этого
    состояния. Собственные настройки (заметка) читаются/пишутся через
@@ -488,8 +732,9 @@ ModuleManager (состояние) ⇄ ModuleStatePersistence ⇄ Isar (Этап
 весь механизм `install/enable/disable/uninstall` из `ModuleManager`
 (поведение и проверки переходов — те же, менялась только реализация
 хранилища внутри), `ModuleStatePersistence`, `ModuleStateRestorer`,
-`ModuleStateStore`, `ModuleStorageIsar`, `AppDrawer` (совсем не тронут
-— по-прежнему просто перечисляет `ModuleRegistry.modules`).
+`ModuleStateStore`, `ModuleStorageIsar`; навигация ядра на этом этапе
+не трогалась — она по-прежнему просто перечисляет
+`ModuleRegistry.modules`.
 
 **Сознательно оставлено на Этап 11 (и далее):**
 - Формат внешнего модуля (`manifest.json`, `assets/`, `data/`) —
@@ -500,14 +745,14 @@ ModuleManager (состояние) ⇄ ModuleStatePersistence ⇄ Isar (Этап
   когда появится импорт внешних модулей, эту функцию (или её вызов)
   нужно будет сузить явно.
 - Module Store UI (список «Установленные / Доступные / Обновления») —
-  вместо него `AppDrawer` + собственная страница модуля, как и
+  вместо него навигация ядра + собственная страница модуля, как и
   требовало условие «Запрещено» этого этапа.
-- `AppDrawer` по-прежнему не фильтрует список по состоянию (показывает
-  модуль, даже если он `disabled`/`uninstalled`) — сознательно не
-  трогался; сама страница модуля корректно отражает состояние и
-  предлагает нужные действия, так что видимого разрыва в поведении
-  нет, но полноценная фильтрация списка — тоже, вероятно, задача
-  Module Store UI (Этап 12).
+- Список модулей в навигации по-прежнему не фильтруется по
+  состоянию (показывает модуль, даже если он `disabled`/
+  `uninstalled`) — сознательно не трогался; сама страница модуля
+  корректно отражает состояние и предлагает нужные действия, так что
+  видимого разрыва в поведении нет, но полноценная фильтрация списка
+  — тоже, вероятно, задача Module Store UI (Этап 12).
 
 **Проверки:** Flutter/Dart SDK недоступен — `dart analyze`/`flutter
 test` не запускались. Тесты (`example_module_test.dart`) покрывают
@@ -650,9 +895,8 @@ test/core/modules/external/module_store_test.dart # НОВЫЙ: весь чек-
 ```
 
 **Изменены:** `lib/core/navigation/app_routes.dart` (маршрут `/modules`),
-`lib/ui/widgets/app_drawer.dart` (пункт меню «Модули» — первое
-изменение этого файла с Этапа 3, ранее сознательно откладывалось
-именно до Module Store UI).
+навигация ядра (пункт «Модули» — первое изменение навигации с
+Этапа 3, ранее сознательно откладывалось именно до Module Store UI).
 
 **Структура Module Store:**
 ```
@@ -719,7 +963,7 @@ installed), ни в Доступных (id всё ещё занят в `ModuleRe
 раз код встроен и никуда не делся). Переустановить его через
 Module Store в этом состоянии сейчас нельзя — но сама возможность
 переустановки уже проверена в Этапе 10 через собственную страницу
-`ExampleModule` (она остаётся доступной через `AppDrawer` независимо
+`ExampleModule` (она остаётся доступной через навигацию независимо
 от состояния). Не стал добавлять для этого частного случая
 отдельную ветку в UI, чтобы не плодить логику ради одного сценария,
 но фиксирую как открытый вопрос.
@@ -738,9 +982,9 @@ test` не запускались. `module_store_test.dart` покрывает �
 `manifest.json`/ассетов с диска или из ZIP (по-прежнему не
 реализовано нигде), устранение известного ограничения выше
 (переустановка полностью удалённого встроенного модуля через
-Module Store), возможная общая фильтрация `AppDrawer` по состоянию
-модуля (сейчас список в Drawer и `InstalledSection` фильтруются
-независимо и слегка по-разному).
+Module Store), возможная общая фильтрация списка модулей по
+состоянию (тогда список в навигации и `InstalledSection`
+фильтровались независимо и слегка по-разному).
 
 Команды для локального запуска:
 ```
@@ -870,6 +1114,11 @@ lib/modules/schedule/
 
 test/modules/schedule/schedule_module_test.dart # НОВЫЙ: весь чек-лист «Проверить»
 ```
+
+**Позже (QUAL-03)** модуль получил свою секцию главного экрана:
+`lib/modules/schedule/ui/home/` (`schedule_home_section.dart`,
+`today_hero.dart`, `timeline_strip.dart`, `upcoming_agenda.dart`) —
+подробнее в разделе «Актуальное состояние проекта».
 
 **Изменён один файл:** `lib/core/modules/module_bootstrap.dart` —
 добавлена одна строка `ScheduleModule()` рядом с `ExampleModule()`,

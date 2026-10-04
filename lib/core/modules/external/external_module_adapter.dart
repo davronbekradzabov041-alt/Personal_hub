@@ -13,6 +13,11 @@ import '../module_manifest.dart';
 /// показывает поля манифеста. Никакой функциональности пакета это не
 /// добавляет и не может добавить — у пакета её и нет.
 ///
+/// **Architectural Rule:** External modules do not execute arbitrary
+/// Dart code and do not provide arbitrary custom Flutter UI. External
+/// modules are declarative packages consisting of manifest, controlled
+/// capabilities, data and assets.
+///
 /// `ModuleRegistry.register()` всё ещё защищает от подмены: если id
 /// уже занят ДРУГИМ объектом (например, настоящим встроенным
 /// ExternalModuleAdapter-ом внешнего пакета того же id — или, для id

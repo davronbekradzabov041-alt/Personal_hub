@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
-import '../../core/constants/app_strings.dart';
 import '../../core/settings/app_settings_controller.dart';
 import '../../core/settings/app_settings_scope.dart';
 import '../../core/design/design_system.dart';
-import '../widgets/app_drawer.dart';
+import '../../core/navigation/app_routes.dart';
 
 /// Экран настроек приложения.
 ///
@@ -11,6 +10,12 @@ import '../widgets/app_drawer.dart';
 /// AppSettingsScope.of(context) (core/settings/) — каждое
 /// изменение сразу сохраняется в Isar, отдельной кнопки
 /// "Сохранить" не требуется.
+///
+/// Экран открывается как корневой именованный маршрут
+/// (AppRoutes.settings), то есть поверх AppShell, поэтому свой
+/// AppBar он не строит: оболочка остаётся под ним, а не оборачивает
+/// его. Раздел «Данные» ведёт на Backup через именованный маршрут
+/// AppRoutes.backup — единственный способ навигации к этому экрану.
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
@@ -19,8 +24,6 @@ class SettingsScreen extends StatelessWidget {
     final controller = AppSettingsScope.of(context);
 
     return Scaffold(
-      appBar: AppBar(title: const Text(AppStrings.settingsTitle)),
-      drawer: const AppDrawer(),
       body: ListenableBuilder(
         listenable: controller,
         builder: (context, _) {
@@ -45,6 +48,25 @@ class SettingsScreen extends StatelessWidget {
               SizedBox(height: AppSpacing.sm),
               _LanguageRadioGroup(
                 controller: controller,
+              ),
+              SizedBox(height: AppSpacing.xl),
+              Divider(),
+              SizedBox(height: AppSpacing.lg),
+              AppComponents.sectionHeader(
+                context: context,
+                title: 'Данные',
+              ),
+              SizedBox(height: AppSpacing.sm),
+              ListTile(
+                leading: const Icon(Icons.backup_outlined),
+                title: const Text('Резервные копии'),
+                subtitle: const Text(
+                  'Создать backup приложения или модуля и восстановить данные',
+                ),
+                contentPadding: EdgeInsets.zero,
+                onTap: () {
+                  Navigator.of(context).pushNamed(AppRoutes.backup);
+                },
               ),
               SizedBox(height: AppSpacing.xl),
               Text(

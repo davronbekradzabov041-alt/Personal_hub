@@ -419,8 +419,11 @@ void main() {
       await manager.uninstall('victim');
       await Future<void>.delayed(Duration.zero);
 
-      // Жертва: ни состояния, ни данных не осталось.
-      expect(await store.load('victim'), isNull);
+      // Жертва: tombstone остаётся, данные очищены
+      final victimState = await store.load('victim');
+      expect(victimState, isNotNull);
+      expect(victimState!.state, 'uninstalled');
+      expect(victimState.enabled, isFalse);
       expect(storageA.data, isEmpty);
 
       // Выживший: состояние и данные целы — ядро (другие коллекции

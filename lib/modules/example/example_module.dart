@@ -6,6 +6,8 @@ import '../../core/modules/module_manager_scope.dart';
 import '../../core/modules/module_manifest.dart';
 import '../../core/modules/module_permission.dart';
 import '../../core/modules/module_state.dart';
+import '../../core/modules/module_state_persistence.dart';
+import '../../core/modules/module_state_persistence_scope.dart';
 import '../../core/modules/module_storage.dart';
 import '../../core/search/search_provider.dart';
 import '../../core/search/search_result.dart';
@@ -147,13 +149,24 @@ class _ExampleModulePageState extends State<_ExampleModulePage> {
   /// Запускает lifecycle-действие и показывает ModuleLifecycleError
   /// снэкбаром вместо того, чтобы уронить необработанное исключение
   /// в консоль — полезно именно потому, что это эталонный модуль.
-  void _run(Future<void> Function() action) {
-    action().catchError((Object error) {
+  ///
+  /// Действие доводится до записи состояния через
+  /// [ModuleStatePersistence.runAndFlush]: возвращаться «успехом» до
+  /// того, как состояние легло в хранилище, нельзя — процесс можно
+  /// завершить в промежутке, и модуль воскреснет.
+  Future<void> _run(Future<void> Function() action) async {
+    try {
+      final persistence = ModuleStatePersistenceScope.of(context);
+      await persistence.runAndFlush(action);
+    } catch (error) {
       if (!mounted) return;
-      final message =
-          error is ModuleLifecycleError ? error.reason : error.toString();
+      final message = error is ModuleLifecycleError
+          ? error.reason
+          : error is ModuleStatePersistenceException
+              ? error.reason
+              : error.toString();
       AppComponents.showSnackBar(context: context, message: message);
-    });
+    }
   }
 
   String _stateLabel(ModuleState? state) {

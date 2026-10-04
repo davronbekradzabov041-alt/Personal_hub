@@ -10,6 +10,7 @@ import '../../core/design/design_system.dart';
 /// этом не знает: он просто вызывает GlobalSearchService.search()
 /// и рисует список SearchResult. Когда появятся модули со своими
 /// провайдерами, этот файл менять не придётся.
+/// AppBar предоставляется AppShell (Search доступен через Top Context Bar).
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
 
@@ -41,24 +42,30 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: AppComponents.textField(
-          controller: _controller,
-          hintText: 'Поиск…',
-          prefixIcon: const Icon(Icons.search),
-          suffixIcon: _controller.text.isNotEmpty
-              ? IconButton(
-                  icon: const Icon(Icons.clear),
-                  onPressed: () {
-                    _controller.clear();
-                    _runSearch('');
-                  },
-                )
-              : null,
-          onChanged: _runSearch,
-        ),
+      body: Column(
+        children: [
+          // Search field - moved from AppBar to body
+          Padding(
+            padding: AppInsets.md,
+            child: AppComponents.textField(
+              controller: _controller,
+              hintText: 'Поиск…',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: _controller.text.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear),
+                      onPressed: () {
+                        _controller.clear();
+                        _runSearch('');
+                      },
+                    )
+                  : null,
+              onChanged: _runSearch,
+            ),
+          ),
+          Expanded(child: _buildBody()),
+        ],
       ),
-      body: _buildBody(),
     );
   }
 

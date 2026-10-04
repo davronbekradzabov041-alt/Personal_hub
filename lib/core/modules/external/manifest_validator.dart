@@ -1,4 +1,6 @@
 import '../module_manifest.dart';
+import '../platform/module_sandbox.dart';
+import '../platform/sandbox_exceptions.dart';
 
 /// Семантическая проверка уже разобранного ModuleManifest.
 ///
@@ -30,6 +32,18 @@ class ManifestValidator {
     // как manifest был получен.
     if (manifest.id.trim().isEmpty) {
       errors.add('id пустой');
+    } else {
+      // Формат id — не бизнес-правило модуля, а требование безопасности
+      // песочницы: id подставляется в filesystem path. Правила не
+      // дублируются, а берутся из ModuleSandbox.validateModuleId — того же
+      // источника, которым пользуется сам ModuleSandbox при построении
+      // директорий. Здесь нужен именно список строк, а не исключение,
+      // поэтому исключение превращается в violation.
+      try {
+        ModuleSandbox.validateModuleId(manifest.id);
+      } on InvalidModuleIdException catch (e) {
+        errors.add('недопустимый moduleId: ${e.reason}');
+      }
     }
 
     // Формат версии (Этап 13): ManifestParser проверяет только, что

@@ -119,17 +119,24 @@ class _EventFormScreenState extends State<EventFormScreen> {
   }
 
   Future<void> _delete() async {
+    final title = widget.existing!.title;
+
+    // Кнопки строятся через actionsBuilder, потому что им нужен
+    // context самого диалога. Navigator.of(context) с context'ом
+    // EventFormScreen закрыл бы сам экран, а не диалог: await ниже
+    // вернул бы не 'true', а результат закрытия формы, и удаление
+    // события происходило бы без подтверждения.
     final confirmed = await AppComponents.showAppDialog<bool>(
       context: context,
       title: const Text('Удалить событие?'),
-      content: Text('«${widget.existing!.title}» будет удалено безвозвратно.'),
-      actions: [
+      content: Text('«$title» будет удалено безвозвратно.'),
+      actionsBuilder: (dialogContext) => [
         AppComponents.textButton(
-          onPressed: () => Navigator.of(context).pop(false),
+          onPressed: () => Navigator.of(dialogContext).pop(false),
           child: const Text('Отмена'),
         ),
         AppComponents.filledButton(
-          onPressed: () => Navigator.of(context).pop(true),
+          onPressed: () => Navigator.of(dialogContext).pop(true),
           child: const Text('Удалить'),
         ),
       ],

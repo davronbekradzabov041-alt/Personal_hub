@@ -129,6 +129,36 @@ void main() {
       final cycles = validator.findDependencyCycles(const {});
       expect(cycles, isEmpty);
     });
+
+    group('недопустимый moduleId (AUD-01 regression)', () {
+      for (final badId in <String>[
+        '../evil',
+        '../../evil',
+        '/absolute/path',
+        r'C:\absolute\evil',
+        'foo/bar',
+      ]) {
+        test('отклоняется "$badId"', () {
+          // id подставляется в JSON-значение, поэтому обратные слэши
+          // экранируются — иначе проверялся бы не id, а битый JSON.
+          final jsonId = badId.replaceAll('\\', r'\\');
+          final json = _validManifestJson.replaceFirst('"notes-lite"', '"$jsonId"');
+          final manifest = parser.parse(json);
+          final errors = validator.validate(manifest, existingModuleIds: const {});
+          expect(
+            errors.any((e) => e.contains('недопустимый moduleId')),
+            isTrue,
+            reason: 'validator обязан отклонить "$badId", получено: $errors',
+          );
+        });
+      }
+
+      test('корректный moduleId не даёт ошибок формата', () {
+        final manifest = parser.parse(_validManifestJson);
+        final errors = validator.validate(manifest, existingModuleIds: const {});
+        expect(errors.where((e) => e.contains('недопустимый moduleId')), isEmpty);
+      });
+    });
   });
 
   group('ModuleImportResult.from', () {

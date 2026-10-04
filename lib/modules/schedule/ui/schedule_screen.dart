@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/design/design_system.dart';
 import '../../../core/modules/module_manager_scope.dart';
 import 'event_form_screen.dart';
 import '../schedule_repository.dart';
@@ -12,6 +13,7 @@ import 'today_tab.dart';
 /// в контракте Module (Этап 7) не получает ModuleApi напрямую, чтобы
 /// не тянуть за собой раннюю реализацию ModuleManager — вместо этого
 /// каждая страница модуля сама достаёт его из Scope.
+/// AppBar предоставляется AppShell. TabBar перенесён в body.
 class ScheduleScreen extends StatefulWidget {
   const ScheduleScreen({super.key, required this.moduleId});
   final String moduleId;
@@ -72,22 +74,30 @@ class _ScheduleScreenState extends State<ScheduleScreen>
     final repository = _repository!;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Расписание'),
-        bottom: TabBar(
+      body: NestedScrollView(
+        headerSliverBuilder: (context, innerBoxIsScrolled) => [
+          SliverAppBar(
+            automaticallyImplyLeading: false,
+            pinned: true,
+            floating: true,
+            snap: true,
+            title: const Text('Расписание'),
+            bottom: TabBar(
+              controller: _tabController,
+              tabs: const [
+                Tab(text: 'Сегодня'),
+                Tab(text: 'Календарь'),
+              ],
+            ),
+          ),
+        ],
+        body: TabBarView(
           controller: _tabController,
-          tabs: const [
-            Tab(text: 'Сегодня'),
-            Tab(text: 'Календарь'),
+          children: [
+            TodayTab(key: ValueKey('today-$_refreshTick'), repository: repository),
+            CalendarTab(key: ValueKey('calendar-$_refreshTick'), repository: repository),
           ],
         ),
-      ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          TodayTab(key: ValueKey('today-$_refreshTick'), repository: repository),
-          CalendarTab(key: ValueKey('calendar-$_refreshTick'), repository: repository),
-        ],
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: _addEvent,

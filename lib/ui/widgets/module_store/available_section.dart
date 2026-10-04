@@ -87,8 +87,25 @@ class AvailableSection extends StatelessWidget {
     final adapter = ExternalModuleAdapter(result.package!.manifest);
 
     runModuleAction(context, () async {
+      // Регистрация обязана предшествовать install: ModuleManager
+      // устанавливает уже зарегистрированный модуль и для
+      // несуществующего в ModuleRegistry id возвращает «модуль не
+      // зарегистрирован».
       ModuleRegistry.register(adapter); // повторная защита на уровне реестра
-      await manager.install(adapter.id);
+      try {
+        await manager.install(adapter.id);
+      } catch (_) {
+        // Установка не удалась — снимаем регистрацию. Иначе модуль
+        // навсегда исчезал бы из «Доступных» (раздел фильтрует по
+        // ModuleRegistry.contains), но не появлялся бы в
+        // «Установленных», и повторная установка в этой сессии
+        // была бы невозможна.
+        //
+        // Состояние при этом уже откачено внутри tryInstall, поэтому
+        // ModuleManager здесь ничего трогать не нужно.
+        ModuleRegistry.unregister(adapter.id);
+        rethrow;
+      }
     });
   }
 }

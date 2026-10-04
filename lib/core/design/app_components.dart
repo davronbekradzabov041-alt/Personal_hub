@@ -331,20 +331,32 @@ class AppComponents {
   // =========================================================================
   // AppDialog — диалог
   // =========================================================================
+
+  /// Показывает стандартный диалог приложения.
+  ///
+  /// Кнопки в [actions] получают `context` вызывающего кода. Это ловушка:
+  /// `Navigator.of(context)` в таком callback закрывает не dialog, а
+  /// маршрут под ним (например, экран, открывший диалог). Для кнопок,
+  /// которые сами закрывают диалог, используйте [actionsBuilder] — он
+  /// выполняется внутри builder'а [showDialog] и получает именно тот
+  /// `BuildContext`, который принадлежит dialog route.
   static Future<T?> showAppDialog<T>({
     required BuildContext context,
     required Widget title,
     required Widget content,
     List<Widget>? actions,
+    List<Widget> Function(BuildContext dialogContext)? actionsBuilder,
     bool barrierDismissible = true,
   }) {
     return showDialog<T>(
       context: context,
       barrierDismissible: barrierDismissible,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: title,
         content: content,
-        actions: actions,
+        actions: actionsBuilder != null
+            ? actionsBuilder(dialogContext)
+            : actions,
         actionsAlignment: MainAxisAlignment.end,
         actionsPadding: EdgeInsets.only(
           right: AppSpacing.md,
@@ -479,7 +491,7 @@ class AppComponents {
   }
 
   // =========================================================================
-  // FeatureCard — интерактивный блок с accent border
+  // FeatureCard — интерактивный блок для модулей (без цветной левой полосы)
   // =========================================================================
   static Widget featureCard({
     required BuildContext context,
@@ -500,11 +512,13 @@ class AppComponents {
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         borderRadius: AppRadii.featureCard(context),
-        border: Border(
-          left: BorderSide(
-            color: selected || onTap != null ? accent : Colors.transparent,
-            width: 2,
-          ),
+        border: Border.all(
+          color: selected
+              ? accent
+              : (onTap != null
+                  ? theme.colorScheme.outlineVariant
+                  : Colors.transparent),
+          width: selected ? 2 : 1,
         ),
         boxShadow: [
           BoxShadow(
@@ -517,6 +531,43 @@ class AppComponents {
       child: InkWell(
         onTap: onTap,
         borderRadius: AppRadii.featureCard(context),
+        child: child,
+      ),
+    );
+  }
+
+  // =========================================================================
+  // InteractiveTile — общий интерактивный тайл (surface + shadow, без border)
+  // =========================================================================
+  static Widget interactiveTile({
+    required BuildContext context,
+    required Widget child,
+    EdgeInsetsGeometry? padding,
+    BorderRadius? borderRadius,
+    bool selected = false,
+    VoidCallback? onTap,
+  }) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    
+    return AnimatedContainer(
+      duration: AppAnimations.getDuration(context, AppSpacing.durationStandard),
+      curve: Curves.easeInOut,
+      padding: padding ?? AppInsets.cardPadding,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: borderRadius ?? AppRadii.md,
+        boxShadow: [
+          BoxShadow(
+            color: theme.colorScheme.shadow.withValues(alpha: isDark ? 0.15 : 0.1),
+            blurRadius: selected ? 8 : 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: borderRadius ?? AppRadii.md,
         child: child,
       ),
     );
@@ -558,8 +609,7 @@ class AppComponents {
     bool focused = false,
   }) {
     final theme = Theme.of(context);
-    final isFocused = focused;
-    
+
     return Container(
       padding: padding ?? AppInsets.cardPadding,
       decoration: BoxDecoration(
@@ -590,8 +640,7 @@ class AppComponents {
     bool selected = false,
   }) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    
+
     return InkWell(
       onTap: onTap,
       borderRadius: AppRadii.full,

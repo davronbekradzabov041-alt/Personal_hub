@@ -164,7 +164,7 @@ void main() {
     expect(manager.stateOf('notes-lite'), ModuleState.disabled);
   });
 
-  test('uninstall удаляет', () async {
+  test('uninstall удаляет состояние и данные, но сохраняет tombstone', () async {
     await _installFromCatalog(manager, notesLite);
     await manager.enable('notes-lite');
     await manager.disable('notes-lite');
@@ -172,7 +172,10 @@ void main() {
     await _flush();
 
     expect(manager.isInstalled('notes-lite'), isFalse);
-    expect(await store.load('notes-lite'), isNull);
+    final saved = await store.load('notes-lite');
+    expect(saved, isNotNull);
+    expect(saved!.state, 'uninstalled');
+    expect(saved.enabled, isFalse);
   });
 
   test('update меняет версию', () async {
