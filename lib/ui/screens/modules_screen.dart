@@ -30,6 +30,17 @@ class ModulesScreen extends StatelessWidget {
             onPressed: () => _importModule(context),
             tooltip: 'Импорт модуля',
           ),
+          // Обновление из файла .phm — второй пользовательский вход в
+          // тот же механизм, что и импорт: те же PackageReader,
+          // security-guard и ManifestValidator, только целевой модуль
+          // уже установлен. Отдельное действие рядом с импортом, а не в
+          // разделе «Обновления»: там перечисляются версии ВСТРОЕННОГО
+          // каталога, а не файлы с диска.
+          IconButton(
+            icon: const Icon(Icons.upgrade),
+            onPressed: () => _updateModule(context),
+            tooltip: 'Обновить модуль из файла',
+          ),
         ],
       ),
       body: ResponsiveBuilder(
@@ -119,6 +130,79 @@ class ModulesScreen extends StatelessWidget {
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Модуль ${importResult!.moduleId} успешно импортирован')),
+    );
+  }
+
+  /// Обновление установленного модуля из .phm-файла.
+  ///
+  /// Отличие от импорта ровно одно и оно существенное: целевой модуль
+  /// уже установлен, поэтому обновление НЕ трогает его данные и
+  /// состояние (ModuleImporter.updateFromPackageBytes) и обязано дойти
+  /// до записи состояния через тот же runAndFlush — версия модуля
+  /// записывается как installedVersion, и без ожидания записи
+  /// пользователь увидел бы «обновлён» при версии, которая не пережила
+  /// бы перезапуск.
+  ///
+  /// stateStore передаётся импортёру не для красоты: снимок, снятый
+  /// перед обновлением, обязан быть сделан тем же хранилищем, откуда
+  /// приложение читает состояние при старте, иначе откат записал бы
+  /// мимо.
+  Future<void> _updateModule(BuildContext context) async {
+    final pickerResult = await FilePicker.platform.pickFiles(
+      dialogTitle: 'Выберите .phm файл обновления',
+      type: FileType.custom,
+      allowedExtensions: ['phm'],
+      allowMultiple: false,
+    );
+
+    if (pickerResult == null || pickerResult.files.isEmpty) {
+      // User cancelled
+      return;
+    }
+
+    final bytes = pickerResult.files.first.bytes;
+    if (bytes == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось прочитать файл')),
+      );
+      return;
+    }
+
+    final manager = ModuleManagerScope.of(context);
+    final persistence = ModuleStatePersistenceScope.of(context);
+    final importer = ModuleImporter(
+      moduleManager: manager,
+      stateStore: persistence.stateStore,
+    );
+
+    ModuleImportOutcome? updateResult;
+    try {
+      await persistence.runAndFlush(() async {
+        updateResult = await importer.updateFromPackageBytes(bytes);
+      });
+    } on ModuleStatePersistenceException catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.reason)),
+      );
+      return;
+    }
+
+    if (!context.mounted) return;
+
+    if (updateResult == null || updateResult!.isFailure) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Ошибка обновления: ${updateResult?.error ?? 'нет результата'}',
+          ),
+        ),
+      );
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Модуль ${updateResult!.moduleId} обновлён')),
     );
   }
 }

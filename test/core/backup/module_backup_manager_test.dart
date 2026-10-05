@@ -91,12 +91,36 @@ class _FailOnceModuleStorage implements ModuleStorage {
 
 class _FakeModuleStorageFactory {
   final Map<String, Map<String, String>> buckets = {};
-  final Map<String, _FailOnceModuleStorage> storages = {};
+  final Map<String, ModuleStorage> storages = {};
 
   ModuleStorage call(String moduleId) {
     final bucket = buckets.putIfAbsent(moduleId, () => {});
-    return storages.putIfAbsent(moduleId, () => _FailOnceModuleStorage(bucket));
+    return storages.putIfAbsent(
+      moduleId,
+      () => _FailOnceModuleStorage(bucket),
+    );
   }
+}
+
+/// Запись и удаление всегда падают: и применение, и откат не могут
+/// завершиться успешно.
+class _BrokenWriteStorage implements ModuleStorage {
+  _BrokenWriteStorage(this._bucket);
+
+  final Map<String, String> _bucket;
+
+  @override
+  Future<String?> getString(String key) async => _bucket[key];
+
+  @override
+  Future<void> setString(String key, String value) async =>
+      throw StateError('имитация сбоя записи');
+
+  @override
+  Future<void> remove(String key) async => throw StateError('имитация сбоя удаления');
+
+  @override
+  Future<List<String>> keys() async => _bucket.keys.toList();
 }
 
 ModuleManifest _manifestFor(String id) => ModuleManifest(
@@ -399,6 +423,57 @@ void main() {
 
       expect(await storageFactory.call('beta').getString('boom'), 'beta-value',
           reason: 'соседний модуль не должен пострадать при откате');
+    });
+  });
+
+  group('откат не удался (Этап 8.1-А)', () {
+    // Снимок и откат вынесены в ModuleSnapshotService, который не знает
+    // про слой backup и бросает собственный тип исключения. Контракт
+    // restore при этом ОБЯЗАН остаться прежним: наружу выходит
+    // ModuleRestoreException — на него завязана и отчётность
+    // (BackupErrorPresenter), и вызывающие Этапов 10/13.
+    test('наружу выходит ModuleRestoreException, а не тип слоя snapshot', () async {
+      await storageFactory.call('alpha').setString('k1', 'v1');
+      final bytes = await backupOf('alpha');
+
+      // Чтение продолжает работать (иначе снимок был бы пустым и
+      // откату нечего было бы возвращать), а запись и удаление падают:
+      // и применение, и откат обречены.
+      final broken = _BrokenWriteStorage(storageFactory.buckets['alpha']!);
+      final brokenManager = ModuleManager(
+        searchService: GlobalSearchService(),
+        storageFactory: (id) => id == 'alpha' ? broken : storageFactory.call(id),
+      );
+      addTearDown(brokenManager.dispose);
+      brokenManager.setStateForTesting('alpha', ModuleState.enabled);
+
+      await expectLater(
+        ModuleBackupManager(
+          moduleManager: brokenManager,
+          stateStore: store,
+          assetsDirectoryResolver: (id) async => assetsDirs[id]!,
+        ).restoreBackup(
+          archiveBytes: bytes,
+          targetModuleId: 'alpha',
+        ),
+        throwsA(
+          isA<ModuleRestoreException>()
+              // Конструктор сам добавляет обёртку «откат
+              // восстановления не удался:», а причиной получает
+              // сообщение отката — обе части обязаны сохраниться, иначе
+              // UI отчётности перестал бы отличать этот случай от
+              // обычной ошибки восстановления.
+              .having(
+                (e) => e.message,
+                'message',
+                allOf(
+                  startsWith('откат восстановления не удался:'),
+                  contains('откат не удался:'),
+                ),
+              )
+              .having((e) => e.cause, 'cause', isA<String>()),
+        ),
+      );
     });
   });
 

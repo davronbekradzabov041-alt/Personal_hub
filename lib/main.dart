@@ -14,6 +14,7 @@ import 'core/modules/module_bootstrap.dart';
 import 'core/modules/module_manager.dart';
 import 'core/modules/module_state_persistence.dart';
 import 'core/modules/module_state_restorer.dart';
+import 'core/modules/platform/module_sandbox_swap.dart';
 import 'core/search/global_search_service.dart';
 import 'core/search/providers/core_test_item_search_provider.dart';
 import 'core/settings/app_settings_controller.dart';
@@ -80,6 +81,7 @@ void _logError(String context, Object error) {
 /// Собирает приложение. Бросает, если инициализация не удалась.
 Future<Widget> _bootstrap() async {
   await IsarService.init();
+  await _recoverInterruptedModuleUpdates();
   registerCoreModules();
 
   final settingsController = AppSettingsController(AppSettingsRepository());
@@ -128,6 +130,43 @@ Future<Widget> _bootstrap() async {
     backupGateway: _createBackupGateway(moduleManager, moduleStateRepository),
     statePersistence: statePersistence,
   );
+}
+
+/// Возвращает на место модули, чьё обновление прервал сбой процесса
+/// (Этап 8.1-Б).
+///
+/// Обмен песочницы состоит из двух переносов, и между ними модуля нет
+/// на месте: если процесс в этот момент умрёт, песочница останется
+/// только в каталоге прежней версии. Само восстановление — механизм
+/// ModuleSandboxSwap; здесь только решение о том, КОГДА его звать.
+///
+/// Порядок обязателен: до регистрации модулей и до восстановления их
+/// состояния. Иначе состояние «установлен» было бы восстановлено у
+/// модуля, чьей песочницы на диске нет, — то есть приложение сообщило
+/// бы пользователю о модуле, который не запустится.
+///
+/// Сбой восстановления НЕ роняет запуск: модуль, который не удалось
+/// вернуть, — это отсутствующий модуль, а не неработающее приложение.
+/// Причина попадает в лог, а пользователь увидит, что модуля нет, в
+/// списке установленных.
+Future<void> _recoverInterruptedModuleUpdates() async {
+  try {
+    final report = await ModuleSandboxSwap().recoverAllInterrupted();
+    if (report.recovered.isEmpty && report.discarded.isEmpty) return;
+    _logNote(
+      'восстановление прерванных обновлений модулей: '
+      'возвращено ${report.recovered.join(", ")}, '
+      'убраны остатки прежних версий ${report.discarded.join(", ")}',
+    );
+  } on Object catch (error) {
+    _logError('восстановление прерванных обновлений модулей', error);
+  }
+}
+
+/// Записывает заметную, но не аварийную ситуацию запуска.
+void _logNote(String message) {
+  if (!kDebugMode) return;
+  debugPrint('Personal Hub: $message');
 }
 
 /// Собирает операции backup для UI.

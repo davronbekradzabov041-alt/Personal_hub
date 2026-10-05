@@ -14,6 +14,8 @@ import 'module_state.dart';
 import 'module_state_store.dart';
 import 'module_storage.dart';
 import 'module_storage_isar.dart';
+import 'module_update_validator.dart';
+import 'module_version.dart';
 
 /// Оркестратор жизненного цикла модулей.
 ///
@@ -40,10 +42,23 @@ class ModuleManager extends ChangeNotifier {
   ModuleManager({
     required GlobalSearchService searchService,
     ModuleStorage Function(String moduleId)? storageFactory,
+    ModuleUpdateValidator? updateValidator,
   })  : _searchService = searchService,
-        _storageFactory = storageFactory ?? ModuleStorageIsar.new;
+        _storageFactory = storageFactory ?? ModuleStorageIsar.new,
+        _updateValidator = updateValidator ?? ModuleUpdateValidator();
 
   final GlobalSearchService _searchService;
+
+  /// Проверки обновления (Этап 8.1-А). Внедряются, чтобы политика
+  /// отката была задаваемой в одном месте, а не размазанной по
+  /// вызывающим: по умолчанию откат версии запрещён.
+  final ModuleUpdateValidator _updateValidator;
+
+  /// Валидатор обновления, действующий в этом менеджере.
+  ///
+  /// Открыт наружу для проверки плана ДО попытки обновления (UI
+  /// Этапа 8.1-Б показывает, что именно не так, не начиная обновления).
+  ModuleUpdateValidator get updateValidator => _updateValidator;
 
   /// Фабрика хранилища модуля — по умолчанию настоящий Isar-backed
   /// ModuleStorageIsar (Этап 9/10). Параметр — не смена архитектуры,
@@ -256,16 +271,23 @@ class ModuleManager extends ChangeNotifier {
   /// ModuleRegistry той же id, не меняя текущее состояние
   /// жизненного цикла (installed/enabled/disabled — как было).
   ///
-  /// Это ровно то, для чего уже есть контракты: ModuleManifest.id
-  /// и .version — простые строки, сравнение — на равенство. Полноценной
-  /// системы обновлений здесь нет и не должно быть: нет semver-сравнения,
-  /// нет onUpdate-хука в Module (Этап 7 его не определял), нет миграции
-  /// сохранённых данных. Всё это — за пределами Этапа 8.
+  /// Этап 8.1-А: проверки вынесены в ModuleUpdateValidator, обмен —
+  /// в ModuleRegistry.swap. Здесь остаётся только разворот отказа
+  /// плана в ModuleLifecycleError, потому что сигнатура update()
+  /// задана вызывающими Этапов 10/12, а менять её без необходимости
+  /// нельзя.
   ///
-  /// Этап 13: если регистрация НОВОЙ версии почему-то отказывает
-  /// (например, id внезапно занят другим объектом), старая версия
-  /// возвращается в реестр — модуль не остаётся без зарегистрированного
-  /// кода вовсе.
+  /// Чего здесь по-прежнему НЕТ (Этап 8.1-Б): миграции сохранённых
+  /// данных, `onUpdate`-хука, обмена песочницы внешнего модуля,
+  /// notion «обновление в процессе» и UI. Ничего из этого не
+  /// симулируется: подменяется ТОЛЬКО объект в реестре, хранилище и
+  /// состояние не трогаются.
+  ///
+  /// Отката как отдельного шага здесь нет не по недосмотру: swap —
+  /// одна мутация списка, которая не бросает после частичного
+  /// изменения. Если подготовка (валидация) не прошла, реестр не
+  /// тронут вовсе, а если прошла — обмен уже состоялся, и
+  /// ModuleRegistry.swap(previous) возвращает всё как было.
   Future<void> update(Module newVersion) async {
     final moduleId = newVersion.id;
     final current = _states[moduleId];
@@ -284,21 +306,21 @@ class ModuleManager extends ChangeNotifier {
       // из случаев, которые должна ловить архитектура проверок.
       throw ModuleLifecycleError(moduleId, 'модуль не найден в ModuleRegistry');
     }
-    if (old.manifest.version == newVersion.manifest.version) {
-      throw ModuleLifecycleError(
-        moduleId,
-        'версия не изменилась (${old.manifest.version})',
-      );
+
+    final plan = _updateValidator.validate(
+      newManifest: newVersion.manifest,
+      currentManifest: old.manifest,
+      currentState: current,
+      installedManifests: [
+        for (final module in ModuleRegistry.modules)
+          if (module.id != moduleId) module.manifest,
+      ],
+    );
+    if (!plan.isAccepted) {
+      throw updateRejectionToError(plan);
     }
 
-    ModuleRegistry.unregister(moduleId);
-    try {
-      ModuleRegistry.register(newVersion);
-    } catch (error) {
-      // Rollback: не оставляем модуль вообще без кода в реестре.
-      ModuleRegistry.register(old);
-      rethrow;
-    }
+    ModuleRegistry.swap(newVersion);
     // Состояние (installed/enabled/disabled) намеренно сохраняется
     // как было — update не должен незаметно "включать" или
     // "выключать" модуль. Хуки onInstall/onEnable заново не зовутся.
@@ -429,7 +451,10 @@ class ModuleManager extends ChangeNotifier {
     return module;
   }
 
-  static final RegExp _versionPattern = RegExp(r'^\d+\.\d+\.\d+$');
+  /// Формат версии — тот же, что у ModuleVersion и ModuleUpdateValidator:
+  /// одно правило на всех, иначе «валидная версия» означала бы разное в
+  /// установке и в обновлении.
+  static final RegExp _versionPattern = ModuleVersion.pattern;
 
   /// Все проверки, которые должны провалить install() (Этап 13,
   /// пп. 1–2). Возвращает список нарушений — специально не

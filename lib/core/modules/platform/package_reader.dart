@@ -110,6 +110,40 @@ class ModulePackageReader {
     );
   }
 
+  /// Reads only the manifest from the package.
+  ///
+  /// Нужна вызывающему, который должен ПЕРВОЙ узнать, о каком модуле
+  /// пакет, до того как решит, что с ним делать (ModuleImporter.
+  /// updateFromPackageBytes: «модуль с таким id установлен?»). Для
+  /// обновляемого модуля полная проверка [readBytes] не годится:
+  /// ManifestValidator счёл бы его id занятым — им же.
+  ///
+  /// Поэтому здесь НЕТ проверки «id уже занят», но ЕСТЬ всё, что
+  /// касается недоверенного архива: security-guard и разбор
+  /// manifest.json. Отсутствующая проверка занятости защиту не обходит
+  /// — её делает вызывающий, у которого есть ModuleRegistry.
+  ///
+  /// Бросает [CorruptedArchiveException], [ArchiveTooLargeException],
+  /// [TooManyFilesException], [ExtractedSizeExceededException] или
+  /// [InvalidManifestException].
+  ModuleManifest readManifest(List<int> archiveBytes) {
+    // Порядок как в readBytes: недоверенные байты не разбираются до
+    // того, как пережили проверку архива.
+    PackageSecurityGuard.validateArchive(archiveBytes);
+    final entries = _extractEntries(archiveBytes);
+
+    final manifestEntry = entries['manifest.json'];
+    if (manifestEntry == null) {
+      throw const InvalidManifestException('manifest.json не найден в архиве');
+    }
+
+    try {
+      return _parser.parse(utf8.decode(manifestEntry));
+    } on ManifestParseException catch (e) {
+      throw InvalidManifestException('невалидный manifest.json: ${e.message}');
+    }
+  }
+
   /// Extracts all files from ZIP into a map of path -> bytes.
   Map<String, List<int>> _extractEntries(List<int> archiveBytes) {
     // Find EOCD

@@ -29,10 +29,9 @@ import 'package:path/path.dart' as path;
 
 import '../modules/module_manager.dart';
 import '../modules/module_registry.dart' show ModuleRegistry;
-import '../modules/module_state.dart';
+import '../modules/module_snapshot.dart';
 import '../modules/module_state_store.dart';
 import '../modules/platform/module_storage_serializer.dart';
-import '../modules/platform/module_sandbox.dart';
 import 'backup_exceptions.dart';
 import 'atomic_file_writer.dart';
 import 'module_backup_options.dart';
@@ -102,46 +101,17 @@ class ModuleRestoreResult {
         );
 }
 
-/// Снимок текущего содержимого модуля — полная основа для отката.
-///
-/// Содержит ТОЛЬКО те компоненты, которые restore будет менять: если
-/// assets не участвуют, снимок по ним не снимается, чтобы откат не
-/// трогал то, что он не менял.
-class _ModuleSnapshot {
-  final String moduleId;
-  final Map<String, String> storage;
-  final ModuleStateSnapshot? state;
-
-  /// Состояние в ModuleManager ДО restore.
-  ///
-  /// Откат обязан вернуть и его: одного лишь хранилища мало, иначе после
-  /// неудачного restore менеджер остался бы с состоянием из архива, а
-  /// следующая синхронизация записала бы его в хранилище — модуль был бы
-  /// «наполовину восстановлен».
-  ///
-  /// null/uninstalled невозможны: restoreBackup отказывается работать с
-  /// неустановленным модулем.
-  final ModuleState? managerState;
-
-  final Map<String, List<int>> assets;
-  final bool assetsDirExisted;
-
-  const _ModuleSnapshot({
-    required this.moduleId,
-    required this.storage,
-    required this.state,
-    required this.managerState,
-    required this.assets,
-    required this.assetsDirExisted,
-  });
-}
-
 /// Создаёт и восстанавливает .pmb для одного установленного модуля.
 ///
 /// [stateStore] и [assetsDirectoryResolver] — внедряемые зависимости.
 /// Без них используется боевая реализация (Isar-репозиторий и
 /// ModuleSandbox). Это обычная конструкторная DI: она не добавляет
 /// методов в ModuleManager, ModuleStorage или IsarService.
+///
+/// Съём снимка и откат делегированы ModuleSnapshotService — общему
+/// механизму, который с Этапа 8 использует и обновление модуля. Здесь
+/// он остаётся с теми же компонентами и в том же порядке, что были до
+/// вынесения, поэтому поведение restore не меняется.
 class ModuleBackupManager {
   ModuleBackupManager({
     required ModuleManager moduleManager,
@@ -149,11 +119,22 @@ class ModuleBackupManager {
     Future<Directory> Function(String moduleId)? assetsDirectoryResolver,
   })  : _moduleManager = moduleManager,
         _stateStore = stateStore,
-        _assetsDirectoryResolver = assetsDirectoryResolver;
+        _assetsDirectoryResolver = assetsDirectoryResolver {
+    _snapshots = ModuleSnapshotService(
+      moduleManager: moduleManager,
+      stateStore: stateStore,
+      assetsDirectoryResolver: assetsDirectoryResolver,
+    );
+  }
 
   final ModuleManager _moduleManager;
   final ModuleStateStore? _stateStore;
+
+  /// Остаётся и после вынесения снимка: тем же резолвером
+  /// пользуется writer при создании .pmb — иначе экспорт и откат
+  /// смотрели бы в разные каталоги ассетов.
   final Future<Directory> Function(String moduleId)? _assetsDirectoryResolver;
+  late final ModuleSnapshotService _snapshots;
 
   /// Создаёт .pmb-архив для установленного модуля.
   ///
@@ -240,7 +221,10 @@ class ModuleBackupManager {
     ModuleBackupOptions options,
   ) async {
     // Снимок ДО любых записей — единственная основа для отката.
-    final snapshot = await _captureSnapshot(moduleId, options);
+    final snapshot = await _snapshots.capture(
+      moduleId: moduleId,
+      components: _componentsFor(options),
+    );
 
     // attempted — компоненты, которые НАЧАЛИ применяться; applied —
     // те, что успешно завершились (это попадает в отчёт).
@@ -273,7 +257,18 @@ class ModuleBackupManager {
         appliedComponents: List.unmodifiable(applied),
       );
     } catch (error) {
-      final rolledBack = await _rollback(snapshot, attempted);
+      final List<String> rolledBack;
+      try {
+        rolledBack = await _snapshots.rollback(
+          snapshot,
+          attemptedComponents: attempted,
+        );
+      } on ModuleSnapshotRollbackException catch (rollbackError) {
+        // Наружу выходит тот же тип, что и до вынесения механизма:
+        // ModuleSnapshotService не знает про слой backup и не может
+        // бросать его исключения, поэтому перевод здесь.
+        throw ModuleRestoreException(rollbackError.message);
+      }
       return ModuleRestoreResult.failure(
         moduleId: moduleId,
         error: error,
@@ -283,45 +278,18 @@ class ModuleBackupManager {
     }
   }
 
-  Future<_ModuleSnapshot> _captureSnapshot(
-    String moduleId,
+  /// Компоненты снимка по опциям restore.
+  ///
+  /// Ровно те же условия, по которым снимок снимался раньше: если
+  /// опция выключена, её данные не снимались и откат их не трогает.
+  Set<ModuleSnapshotComponent> _componentsFor(
     ModuleBackupOptions options,
-  ) async {
-    final storage = <String, String>{};
-    if (options.includeData) {
-      final moduleStorage = _moduleManager.apiFor(moduleId).storage;
-      for (final key in await moduleStorage.keys()) {
-        final value = await moduleStorage.getString(key);
-        if (value != null) storage[key] = value;
-      }
-    }
-
-    final store = _stateStore;
-    final state =
-        (options.includeState && store != null) ? await store.load(moduleId) : null;
-
-    final assets = <String, List<int>>{};
-    var assetsDirExisted = false;
-    if (options.includeAssets) {
-      final dir = await _resolveAssetsDirectory(moduleId);
-      assetsDirExisted = await dir.exists();
-      if (assetsDirExisted) {
-        for (final entity in await dir.list().toList()) {
-          if (entity is File) {
-            assets[path.basename(entity.path)] = await entity.readAsBytes();
-          }
-        }
-      }
-    }
-
-    return _ModuleSnapshot(
-      moduleId: moduleId,
-      storage: storage,
-      state: state,
-      managerState: _moduleManager.stateOf(moduleId),
-      assets: assets,
-      assetsDirExisted: assetsDirExisted,
-    );
+  ) {
+    return <ModuleSnapshotComponent>{
+      if (options.includeData) ModuleSnapshotComponent.storage,
+      if (options.includeState) ModuleSnapshotComponent.state,
+      if (options.includeAssets) ModuleSnapshotComponent.assets,
+    };
   }
 
   Future<void> _applyState(String moduleId, String stateJson) async {
@@ -343,18 +311,37 @@ class ModuleBackupManager {
     }
     final snapshot = ModuleStateSnapshot.fromJson(decoded);
 
+    // Версия в state.json описывает АРХИВ, а установленная версия — это
+    // то, что сейчас в ModuleRegistry (manifest.version). Поэтому в
+    // хранилище уходит снимок с версией реестра: иначе после restore в
+    // приложении появился бы второй источник истины о версии, и любое
+    // решение по версии (например, какую миграцию данных запускать в
+    // Этапе 9) опиралось бы на версию из архива вместо реально
+    // установленной. Тот же принцип держит ModuleStatePersistence._sync.
+    final currentVersion = ModuleRegistry.get(moduleId)?.manifest.version;
+    final effective = currentVersion == null || currentVersion == snapshot.installedVersion
+        ? snapshot
+        : ModuleStateSnapshot(
+            moduleId: snapshot.moduleId,
+            state: snapshot.state,
+            installedVersion: currentVersion,
+            enabled: snapshot.enabled,
+            installedAt: snapshot.installedAt,
+            updatedAt: snapshot.updatedAt,
+          );
+
     // Сначала хранилище, потом ModuleManager. Порядок выбран из-за
     // асинхронности: adoptRestoredState() вызывает notifyListeners(),
     // на который ModuleStatePersistence отвечает собственной записью.
     // Если бы adopt шёл первым, его запись могла бы прийти в любой
     // момент относительно store.save() ниже, и итоговое значение
     // installedVersion зависел бы от того, кто завершился раньше.
-    await store.save(snapshot);
+    await store.save(effective);
 
     // Состояние в памяти обязано стать тем же, что и в архиве: иначе
     // ModuleManager остаётся источником старого состояния, и следующая
     // же синхронизация вернёт его обратно поверх restore (R-01).
-    await _moduleManager.adoptRestoredState(snapshot);
+    await _moduleManager.adoptRestoredState(effective);
   }
 
   Future<void> _applyData(String moduleId, String dataJson) async {
@@ -366,7 +353,7 @@ class ModuleBackupManager {
   }
 
   Future<void> _applyAssets(String moduleId, Map<String, List<int>> assets) async {
-    final dir = await _resolveAssetsDirectory(moduleId);
+    final dir = await _snapshots.resolveAssetsDirectory(moduleId);
     if (!await dir.exists()) {
       await dir.create(recursive: true);
     }
@@ -397,132 +384,6 @@ class ModuleBackupManager {
         await staging.delete(recursive: true);
       }
     }
-  }
-
-  /// Возвращает модуль к [_ModuleSnapshot].
-  ///
-  /// [attempted] — компоненты, которые начали применяться, включая
-  /// упавшие посередине: их данные уже изменены, даже если этап не
-  /// завершился. Откатывает ИХ ПРЕЖНИЕ значения, включая удалённые
-  /// ключи и файлы. Если откат не удался, бросает
-  /// [ModuleRestoreException]: наполовину откатанный модуль опаснее
-  /// явно сообщённой ошибки.
-  Future<List<String>> _rollback(
-    _ModuleSnapshot snapshot,
-    List<String> attempted,
-  ) async {
-    final rolledBack = <String>[];
-    final failures = <Object>[];
-
-    for (final component in attempted) {
-      try {
-        switch (component) {
-          case 'state':
-            final store = _stateStore;
-            if (store != null) {
-              final previous = snapshot.state;
-              if (previous == null) {
-                await store.delete(snapshot.moduleId);
-              } else {
-                await store.save(previous);
-              }
-            }
-            await _rollbackManagerState(snapshot);
-            rolledBack.add('state');
-          case 'data':
-            await _restoreStorage(snapshot.moduleId, snapshot.storage);
-            rolledBack.add('data');
-          case 'assets':
-            await _restoreAssets(
-              snapshot.moduleId,
-              snapshot.assets,
-              snapshot.assetsDirExisted,
-            );
-            rolledBack.add('assets');
-        }
-      } catch (error) {
-        failures.add(error);
-      }
-    }
-
-    if (failures.isNotEmpty) {
-      throw ModuleRestoreException('откат не удался: ${failures.join("; ")}');
-    }
-    return rolledBack;
-  }
-
-  /// Возвращает ModuleManager к состоянию, которое было до restore.
-  ///
-  /// Идёт через тот же контракт adoptRestoredState, что и сам restore, —
-  /// иначе откат состоял бы в прямой записи в приватную карту и не
-  /// запускал бы нужные lifecycle-хуки (модуль, ставший неактивным
-  /// из-за restore, должен снова отписаться от поиска, и наоборот).
-  Future<void> _rollbackManagerState(_ModuleSnapshot snapshot) async {
-    final prior = snapshot.managerState;
-    if (prior == null || prior == ModuleState.uninstalled) return;
-
-    final moduleId = snapshot.moduleId;
-    if (_moduleManager.stateOf(moduleId) == prior) return;
-
-    final previous = snapshot.state;
-    await _moduleManager.adoptRestoredState(ModuleStateSnapshot(
-      moduleId: moduleId,
-      state: prior.name,
-      installedVersion: previous?.installedVersion ?? '',
-      enabled: prior == ModuleState.enabled,
-      installedAt: previous?.installedAt ?? DateTime.now(),
-      updatedAt: DateTime.now(),
-    ));
-  }
-
-  Future<void> _restoreStorage(
-    String moduleId,
-    Map<String, String> expected,
-  ) async {
-    final storage = _moduleManager.apiFor(moduleId).storage;
-
-    // Убрать всё, чего не было до restore.
-    for (final key in await storage.keys()) {
-      if (!expected.containsKey(key)) {
-        await storage.remove(key);
-      }
-    }
-    // Вернуть прежние значения перезаписанных ключей.
-    for (final entry in expected.entries) {
-      await storage.setString(entry.key, entry.value);
-    }
-  }
-
-  Future<void> _restoreAssets(
-    String moduleId,
-    Map<String, List<int>> expected,
-    bool dirExisted,
-  ) async {
-    final dir = await _resolveAssetsDirectory(moduleId);
-
-    if (await dir.exists()) {
-      for (final entity in await dir.list().toList()) {
-        if (entity is File) await entity.delete();
-      }
-    }
-    if (expected.isEmpty) {
-      if (!dirExisted && await dir.exists()) {
-        await dir.delete(recursive: true);
-      }
-      return;
-    }
-    if (!await dir.exists()) {
-      await dir.create(recursive: true);
-    }
-    for (final entry in expected.entries) {
-      await File(path.join(dir.path, entry.key)).writeAsBytes(entry.value);
-    }
-  }
-
-  Future<Directory> _resolveAssetsDirectory(String moduleId) async {
-    final resolver = _assetsDirectoryResolver;
-    if (resolver != null) return resolver(moduleId);
-    return ModuleSandbox.getAssetsDirectory(moduleId);
   }
 
   // -------------------------------------------------------------------

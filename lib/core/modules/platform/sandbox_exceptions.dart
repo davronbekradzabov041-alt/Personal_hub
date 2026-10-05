@@ -52,3 +52,34 @@ class SandboxNotFoundException extends SandboxException {
   const SandboxNotFoundException(this.moduleId)
       : super('sandbox для модуля "$moduleId" не найден');
 }
+
+/// Подготовленный каталог новой версии не найден — обмен невозможен.
+///
+/// Отдельный тип, потому что это НЕ сбой файловой системы, а
+/// неверная последовательность вызовов: сначала prepare, потом commit.
+/// Смешивать его с SandboxIOException нельзя — вызывающий обязан уметь
+/// отличить «диск недоступен» от «забыли подготовить».
+class SandboxStagingMissingException extends SandboxException {
+  final String moduleId;
+  final String path;
+
+  const SandboxStagingMissingException({
+    required this.moduleId,
+    required this.path,
+  }) : super(
+          'подготовленный каталог новой версии для модуля '
+          '"$moduleId" не найден: "$path"',
+        );
+}
+
+/// Обмен песочницы не удался и откат не помог.
+class SandboxSwapException extends SandboxException {
+  final String moduleId;
+  final String? backupPath;
+
+  const SandboxSwapException({
+    required this.moduleId,
+    required String message,
+    this.backupPath,
+  }) : super(message);
+}
