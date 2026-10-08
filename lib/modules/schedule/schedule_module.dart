@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../core/modules/home_section.dart';
 import '../../core/modules/module.dart';
 import '../../core/modules/module_api.dart';
+import '../../core/modules/module_data_migration.dart';
 import '../../core/modules/module_manifest.dart';
 import '../../core/modules/module_permission.dart';
 import 'schedule_category_repository.dart';
@@ -27,6 +28,11 @@ class ScheduleModule extends Module {
     version: '0.1.0',
     apiVersion: kCoreModuleApiVersion,
     author: 'Personal Hub',
+    // Версия формы данных модуля, а не версия кода. Объявлена явно,
+    // потому что Schedule — единственный модуль, данные которого уже
+    // переносились (Этап 7.2), и по умолчанию 1 он выглядел бы так,
+    // будто переноса не было никогда.
+    schemaVersion: ScheduleMigrator.currentSchemaVersion,
     description: 'Планирование событий по дням: список на сегодня, '
         'календарь, создание/редактирование/удаление событий.',
     permissions: [ModulePermission.coreSearch],
@@ -55,6 +61,20 @@ class ScheduleModule extends Module {
   /// Порядок секции на главном экране. Меньше — выше.
   static const int _homeSectionOrder = 10;
 
+  /// Шаг переноса данных Schedule — тот же объект, который
+  /// [ScheduleMigrator] выполняет сегодня.
+  ///
+  /// Объявлен здесь, а не внутри ScheduleMigrator, чтобы платформа
+  /// видела шаги там же, где прочие точки расширения модуля, и не
+  /// зависела от того, что модуль сам себя запускает из onInstall.
+  ///
+  /// На Этапе 9.1 список только объявлен: его никто не перебирает.
+  /// Запуск остаётся у ScheduleMigrator (Этапы 9.3–9.4 переведут его
+  /// на платформенный исполнитель).
+  @override
+  List<ModuleDataMigration> get dataMigrations =>
+      <ModuleDataMigration>[ScheduleCategoriesMigration()];
+
   @override
   Future<void> onInstall(ModuleApi api) async {
     await _migrateStorage(api);
@@ -71,6 +91,14 @@ class ScheduleModule extends Module {
   /// из UI означал бы, что есть путь входа, где про неё забыли.
   /// Плата — один [ScheduleMigrator] и чтение одного ключа маркера на
   /// запуск модуля.
+  ///
+  /// ## Временность этого решения (Этап 9.1)
+  ///
+  /// Запуск миграции из хука — то, что Migration System в Этапах
+  /// 9.3–9.4 заменит вызовом исполнителя платформы. Оно остаётся
+  /// здесь намеренно: маркер и данные уже живут в общем формате
+  /// (ModuleSchemaMarker), а менять точку запуска до появления
+  /// исполнителя значило бы оставить модуль вовсе без переноса.
   ///
   /// ## Почему исключения перехватываются
   ///

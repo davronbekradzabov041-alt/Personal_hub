@@ -8,8 +8,13 @@ import 'module_api.dart';
 import 'module_install_result.dart';
 import 'module_lifecycle_error.dart';
 import 'module_manifest.dart';
+import 'module_migration_plan.dart';
+import 'module_migration_planner.dart';
+import 'module_migration_result.dart';
+import 'module_migration_runner.dart';
 import 'module_permission.dart';
 import 'module_registry.dart';
+import 'module_schema_marker.dart';
 import 'module_state.dart';
 import 'module_state_store.dart';
 import 'module_storage.dart';
@@ -80,6 +85,9 @@ class ModuleManager extends ChangeNotifier {
 
   // --- Наблюдение за состоянием (для будущего UI/тестов) ---
 
+  /// Снимок состояний всех модулей, когда-либо тронутых менеджером.
+  Map<String, ModuleState> get states => Map.unmodifiable(_states);
+
   ModuleState? stateOf(String moduleId) => _states[moduleId];
 
   bool isInstalled(String moduleId) {
@@ -89,8 +97,48 @@ class ModuleManager extends ChangeNotifier {
 
   bool isEnabled(String moduleId) => _states[moduleId] == ModuleState.enabled;
 
-  /// Снимок состояний всех модулей, когда-либо тронутых менеджером.
-  Map<String, ModuleState> get states => Map.unmodifiable(_states);
+  /// Миграции данных: после восстановления состояния (холодный старт)
+/// или при обновлении внешнего модуля выполняем перенос формы данных
+/// к версии, ожидаемой новой версией модуля.
+///
+/// Использует платформенный ModuleMigrationPlanner + ModuleMigrationRunner.
+/// Не создаёт второй executor — Schedule уже делегирует в Runner (Этап 9.3).
+Future<void> runPendingMigrations() async {
+  for (final module in ModuleRegistry.modules) {
+    final state = _states[module.id];
+    if (state == null || state == ModuleState.uninstalled) continue;
+
+    final storage = _storageFactory(module.id);
+    final currentSchema = await ModuleSchemaMarker.read(storage);
+    final targetSchema = module.manifest.schemaVersion;
+
+    if (currentSchema >= targetSchema) continue;
+
+    final plan = ModuleMigrationPlanner().plan(
+      currentSchemaVersion: currentSchema,
+      targetSchemaVersion: targetSchema,
+      migrations: module.dataMigrations,
+    );
+
+    if (!plan.isAccepted) {
+      throw ModuleLifecycleError(
+        module.id,
+        'план переноса данных отклонён: ${plan.violationsText}',
+      );
+    }
+
+    if (plan.steps.isEmpty) continue;
+
+    try {
+      await ModuleMigrationRunner().run(plan: plan, storage: storage);
+    } on ModuleMigrationException catch (e) {
+      throw ModuleLifecycleError(
+        module.id,
+        'перенос данных не удался: $e',
+      );
+    }
+  }
+}
 
   /// Тестовый метод: устанавливает состояние модуля напрямую без Isar.
   /// Только для тестов! Не использовать в продакшн-коде.
@@ -277,11 +325,16 @@ class ModuleManager extends ChangeNotifier {
   /// задана вызывающими Этапов 10/12, а менять её без необходимости
   /// нельзя.
   ///
-  /// Чего здесь по-прежнему НЕТ (Этап 8.1-Б): миграции сохранённых
-  /// данных, `onUpdate`-хука, обмена песочницы внешнего модуля,
-  /// notion «обновление в процессе» и UI. Ничего из этого не
-  /// симулируется: подменяется ТОЛЬКО объект в реестре, хранилище и
-  /// состояние не трогаются.
+  /// Чего здесь по-прежнему НЕТ (Этап 9.1): переноса сохранённых
+  /// данных, `onUpdate`-хука, обмена песочницы внешнего модуля.
+  /// Ничего из этого не симулируется: подменяется ТОЛЬКО объект в
+  /// реестре, хранилище и состояние не трогаются.
+  ///
+  /// Смена версии СХЕМЫ данных (manifest.schemaVersion) — отказ
+  /// проверок, а не предупреждение: этот путь не переносит данные, а
+  /// новый код со старыми данными читает не то, что записано. Когда
+  /// появится исполнитель миграций (Этапы 9.3–9.4), отказ заменится
+  /// переносом; до тех пор он остаётся единственным честным ответом.
   ///
   /// Отката как отдельного шага здесь нет не по недосмотру: swap —
   /// одна мутация списка, которая не бросает после частичного
@@ -321,10 +374,60 @@ class ModuleManager extends ChangeNotifier {
     }
 
     ModuleRegistry.swap(newVersion);
-    // Состояние (installed/enabled/disabled) намеренно сохраняется
-    // как было — update не должен незаметно "включать" или
-    // "выключать" модуль. Хуки onInstall/onEnable заново не зовутся.
+    _apiCache.remove(moduleId);
+
+    // Выполняем миграцию данных, если изменилась версия схемы.
+    // Запускаем ПОСЛЕ swap реестра — новый код уже активен и может
+    // выполнять миграцию. Хранилище и состояние пока не менялись.
+    try {
+      await _runMigrationIfNeeded(moduleId, newVersion.manifest.schemaVersion);
+    } on ModuleLifecycleError {
+      // Migration failed — rollback registry swap.
+      ModuleRegistry.swap(old);
+      _apiCache.remove(moduleId);
+      rethrow;
+    }
+
     notifyListeners();
+  }
+
+  /// Выполняет миграцию данных модуля, если версия схемы в манифесте
+  /// новее, чем сохранённая в маркере.
+  ///
+  /// Вызывается:
+  /// - после swap реестра при обновлении (ModuleManager.update)
+  /// - после восстановления состояния при холодном старте (ModuleStateRestorer)
+  Future<void> _runMigrationIfNeeded(String moduleId, int targetSchemaVersion) async {
+    final storage = _storageFactory(moduleId);
+    final currentSchema = await ModuleSchemaMarker.read(storage);
+    if (currentSchema >= targetSchemaVersion) return;
+
+    final module = ModuleRegistry.get(moduleId);
+    if (module == null) return; // модуль мог быть удалён между шагами
+
+    final plan = ModuleMigrationPlanner().plan(
+      currentSchemaVersion: currentSchema,
+      targetSchemaVersion: targetSchemaVersion,
+      migrations: module.dataMigrations,
+    );
+
+    if (!plan.isAccepted) {
+      throw ModuleLifecycleError(
+        moduleId,
+        'план переноса данных отклонён: ${plan.violationsText}',
+      );
+    }
+
+    if (plan.steps.isEmpty) return;
+
+    try {
+      await ModuleMigrationRunner().run(plan: plan, storage: storage);
+    } on ModuleMigrationException catch (e) {
+      throw ModuleLifecycleError(
+        moduleId,
+        'перенос данных не удался: $e',
+      );
+    }
   }
 
   // --- Восстановление состояния из внешнего источника ---

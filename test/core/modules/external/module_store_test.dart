@@ -104,7 +104,10 @@ void main() {
   setUp(() {
     ModuleRegistry.clear();
     searchService = GlobalSearchService();
-    manager = ModuleManager(searchService: searchService);
+    manager = ModuleManager(
+      searchService: searchService,
+      storageFactory: _FakeModuleStorageFactory().call,
+    );
     store = _FakeModuleStateStore();
     persistence = ModuleStatePersistence(
       manager,
@@ -197,7 +200,10 @@ void main() {
     // ModuleRegistry сохраняет объект модуля (как и в реальном
     // приложении код модулей остаётся скомпилирован между запусками)
     // — восстановление работает через уже зарегистрированный adapter.
-    final freshManager = ModuleManager(searchService: GlobalSearchService());
+    final freshManager = ModuleManager(
+      searchService: GlobalSearchService(),
+      storageFactory: _FakeModuleStorageFactory().call,
+    );
     await ModuleStateRestorer(freshManager, store).restore();
 
     expect(freshManager.stateOf('notes-lite'), ModuleState.enabled);

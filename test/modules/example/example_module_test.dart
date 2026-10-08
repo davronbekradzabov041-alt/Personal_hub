@@ -75,7 +75,10 @@ void main() {
     ModuleRegistry.register(ExampleModule());
 
     searchService = GlobalSearchService();
-    manager = ModuleManager(searchService: searchService);
+    manager = ModuleManager(
+      searchService: searchService,
+      storageFactory: _FakeModuleStorageFactory().call,
+    );
     store = _FakeModuleStateStore();
     persistence = ModuleStatePersistence(
       manager,
@@ -113,7 +116,10 @@ void main() {
     await manager.disable('example');
     await _flush();
 
-    final fresh = ModuleManager(searchService: GlobalSearchService());
+    final fresh = ModuleManager(
+      searchService: GlobalSearchService(),
+      storageFactory: _FakeModuleStorageFactory().call,
+    );
     await ModuleStateRestorer(fresh, store).restore();
     expect(fresh.stateOf('example'), ModuleState.disabled);
   });

@@ -2,7 +2,9 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_hub/core/modules/module_manager.dart';
+import 'package:personal_hub/core/modules/module_migration_result.dart';
 import 'package:personal_hub/core/modules/module_registry.dart';
+import 'package:personal_hub/core/modules/module_schema_marker.dart';
 import 'package:personal_hub/core/modules/module_state.dart';
 import 'package:personal_hub/core/modules/module_storage.dart';
 import 'package:personal_hub/core/search/global_search_service.dart';
@@ -117,7 +119,11 @@ void main() {
       final result = await ScheduleMigrator(storage).run();
 
       expect(result.ran, isTrue);
-      expect(result.previousVersion, isNull, reason: 'маркера не было');
+      // Отсутствие маркера с Этапа 9.1 означает исходную версию 1, а не
+      // «неизвестно»: платформа разбирает маркер сама и молчаливого null
+      // здесь быть не может — иначе «с какой версии переносить» зависело
+      // бы от того, кто именно прочитал маркер.
+      expect(result.previousVersion, '1', reason: 'маркера не было');
       expect(result.createdCategories, 1);
       expect(result.linkedEvents, 1);
 
@@ -140,7 +146,7 @@ void main() {
       await ScheduleMigrator(storage).run();
 
       expect(
-        await storage.getString(ScheduleMigrator.schemaVersionKey),
+        await ModuleSchemaMarker.read(storage),
         ScheduleMigrator.currentSchemaVersion,
       );
     });
@@ -391,7 +397,7 @@ void main() {
           afterFirstRun['category:${all.single.id}']);
       expect((await events.getAll()).single.categoryId, all.single.id);
       expect(
-        await storage.getString(ScheduleMigrator.schemaVersionKey),
+        await ModuleSchemaMarker.read(storage),
         ScheduleMigrator.currentSchemaVersion,
       );
     });
@@ -450,7 +456,8 @@ void main() {
 
       await expectLater(
         ScheduleMigrator(torn).run(),
-        throwsA(isA<StateError>()),
+        throwsA(isA<ModuleMigrationException>()
+            .having((e) => e.cause, 'cause', isA<StateError>())),
       );
 
       expect(
@@ -466,7 +473,8 @@ void main() {
       final torn = _TornStorage(storage)..tearPrefix = 'category:';
       await expectLater(
         ScheduleMigrator(torn).run(),
-        throwsA(isA<StateError>()),
+        throwsA(isA<ModuleMigrationException>()
+            .having((e) => e.cause, 'cause', isA<StateError>())),
       );
 
       final result = await ScheduleMigrator(storage).run();
@@ -479,7 +487,7 @@ void main() {
       expect((await events.getAll()).single.categoryId,
           (await categories.getAll()).single.id);
       expect(
-        await storage.getString(ScheduleMigrator.schemaVersionKey),
+        await ModuleSchemaMarker.read(storage),
         ScheduleMigrator.currentSchemaVersion,
       );
     });
@@ -493,7 +501,7 @@ void main() {
       expect(result.createdCategories, 0);
       expect(await categories.getAll(), isEmpty);
       expect(
-        await storage.getString(ScheduleMigrator.schemaVersionKey),
+        await ModuleSchemaMarker.read(storage),
         ScheduleMigrator.currentSchemaVersion,
       );
     });

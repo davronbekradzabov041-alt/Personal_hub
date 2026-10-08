@@ -74,10 +74,16 @@ void main() {
   setUp(() {
     ModuleRegistry.clear();
     storages = <String, _FakeModuleStorage>{};
+    // Фабрика возвращает ОДИН экземпляр на moduleId — так же, как
+    // настоящая ModuleStorageIsar: это тонкая обёртка над одними и
+    // теми же строками Isar, а не новое хранилище. Прежний double
+    // создавал новую пустую карту на каждый вызов, из-за чего сброс
+    // кэша ModuleApi (Этап 9.1) выглядел бы как потеря данных, хотя
+    // данными является содержимое за moduleId, а не объект-обёртка.
     manager = ModuleManager(
       searchService: GlobalSearchService(),
       storageFactory: (moduleId) =>
-          storages[moduleId] = _FakeModuleStorage(),
+          storages[moduleId] ??= _FakeModuleStorage(),
     );
   });
 

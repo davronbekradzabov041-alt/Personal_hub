@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'home_section.dart';
 import 'module_api.dart';
+import 'module_data_migration.dart';
 import 'module_manifest.dart';
 
 /// Контракт модуля уровня ядра (Module API, Этап 7).
@@ -59,6 +60,24 @@ abstract class Module {
   /// (`ModuleManager.isEnabled`), поэтому состояние модуля
   /// автоматически управляет их видимостью.
   List<HomeSection> get homeSections => const <HomeSection>[];
+
+  /// Шаги переноса данных модуля к новой версии схемы (Этап 9.1).
+  ///
+  /// Пусто по умолчанию — и это не заглушка, а решение по тем же
+  /// причинам, что у [homeSections]: модуль без переносов данных не
+  /// обязан о них знать, а объявлять пустой список в каждом модуле
+  /// — шум, который скрывает настоящие случаи.
+  ///
+  /// Внешние модули (ExternalModuleAdapter) получают пустой список
+  /// по построению: у них нет своего Dart-кода, а шаг миграции — это
+  /// код. Их данные платформа умеет только проверять на совместимость
+  /// и отказывать, а не переносить.
+  ///
+  /// На Этапе 9.1 список только ОБЪЯВЛЯЕТСЯ: никто его не
+  /// перебирает и не запускает. Планировщик и исполнитель появятся
+  /// в Этапах 9.2–9.4.
+  List<ModuleDataMigration> get dataMigrations =>
+      const <ModuleDataMigration>[];
 
   // --- Жизненный цикл: installed → enabled → disabled → uninstalled ---
   //

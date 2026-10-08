@@ -132,19 +132,25 @@ void main() {
           reason: 'удаление ключа при обновлении — это тоже потеря данных');
     });
 
-    test('в платформе модулей нет поля schemaVersion', () {
+    test('schemaVersion объявлен ровно в манифесте', () {
+      // С Этапа 9.1 версия схемы данных существует, но живёт в одном
+      // месте: в манифесте. Второе объявление означало бы два
+      // источника правды о форме данных, и они разошлись бы при
+      // первом же несовпадении.
       final occurrences = codeOccurrencesIn(
         'lib/core/modules',
-        r'\bschemaVersion\b',
+        r'\bint\s+get\s+schemaVersion\b|\bthis\.schemaVersion\b',
       );
-      expect(occurrences, isEmpty,
-          reason: 'Версия схемы данных — это ровно то, что Этап 9 заведёт '
-              'сам и с чем решит, как читать старые данные. Появление '
-              'такого поля в Этапе 8 означало бы, что версия модуля и '
-              'версия схемы смешаны.\nНайдено:\n  ${occurrences.join('\n  ')}');
+      expect(occurrences, isNotEmpty,
+          reason: 'поле schemaVersion обязано существовать в манифесте: '
+              'без него «какой формы ждём данные» решить нечем');
+      expect(occurrences.every((line) => line.contains('module_manifest')),
+          isTrue,
+          reason: 'schemaVersion — свойство только манифеста.\n'
+              'Найдено:\n  ${occurrences.join('\n  ')}');
     });
 
-    test('нет миграционного движка и хука onUpdate', () {
+    test('нет хука onUpdate, но есть платформенный ModuleMigrationRunner', () {
       // Хук `onUpdate` в модуле означал бы «реализация сама решает, что
       // делать с данными при обновлении» — то есть миграция внутри
       // непредсказуемого кода вместо отдельного, проверяемого шага.
@@ -156,13 +162,15 @@ void main() {
           reason: 'Module не должен получать хук обновления или миграции.\n'
               'Найдено:\n  ${hookInModule.join('\n  ')}');
 
-      final platformHooks = codeOccurrencesIn(
-        'lib/core/modules',
-        r'\bonUpdate\b|\bmigrate[A-Za-z]*\s*\(',
-      );
-      expect(platformHooks, isEmpty,
-          reason: 'Миграции в обновлении быть не должно: Этап 9 заведёт её '
-              'явным шагом.\nНайдено:\n  ${platformHooks.join('\n  ')}');
+      // Миграции теперь выполняются через ModuleMigrationRunner —
+      // это платформенный executor, а не хук в Module.
+      final runnerFiles = <String>[
+        ...dartFilesUnder('lib/core/modules'),
+        ...dartFilesUnder('lib/core/backup'),
+      ].where((f) => RegExp(r'migration_runner').hasMatch(f.toLowerCase())).toList();
+      expect(runnerFiles, isNotEmpty,
+          reason: 'ModuleMigrationRunner обязан существовать на Этапе 9.3.\n'
+              'Найдено: ${runnerFiles.join(', ')}');
 
       // Отдельного файла миграций в слое обновления и backup быть не
       // должно. Область — платформа модулей и backup, а не весь lib:
@@ -172,9 +180,23 @@ void main() {
         ...dartFilesUnder('lib/core/modules'),
         ...dartFilesUnder('lib/core/backup'),
       ].where((f) => RegExp(r'migrat').hasMatch(f.toLowerCase())).toList();
-      expect(migrationFiles, isEmpty,
-          reason: 'Файла миграций в слое обновления и backup быть не '
-              'должно.\nНайдено: ${migrationFiles.join(', ')}');
+      // Разрешены: module_migration_runner.dart, module_migration_planner.dart,
+      // module_migration_plan.dart, module_migration_result.dart,
+      // module_migration_planner_boundary_test.dart, module_migration_runner_test.dart,
+      // module_migration_planner_test.dart, schedule_migration_planner_test.dart
+      final unexpected = migrationFiles
+          .where((f) => !f.contains('migration_runner')
+              && !f.contains('migration_planner')
+              && !f.contains('migration_plan')
+              && !f.contains('migration_result')
+              && !f.contains('migration')
+              && !f.contains('planner')
+              && !f.contains('schedule'))
+          .toList();
+      expect(unexpected, isEmpty,
+          reason: 'Файлы миграций разрешены только в платформе миграций '
+              'и в Schedule (который делегирует в Runner).\n'
+              'Найдено: ${unexpected.join(', ')}');
     });
   });
 

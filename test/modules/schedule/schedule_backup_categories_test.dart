@@ -8,6 +8,7 @@ import 'package:personal_hub/core/backup/module_backup_reader.dart';
 import 'package:personal_hub/core/modules/module_manager.dart';
 import 'package:personal_hub/core/modules/module_registry.dart';
 import 'package:personal_hub/core/modules/module_state.dart';
+import 'package:personal_hub/core/modules/module_schema_marker.dart';
 import 'package:personal_hub/core/modules/module_state_store.dart';
 import 'package:personal_hub/core/modules/module_storage.dart';
 import 'package:personal_hub/core/modules/platform/module_storage_serializer.dart';
@@ -208,8 +209,12 @@ void main() {
     );
     await events.add(_event('e1', categoryId: work.id, category: 'Работа'));
     await events.add(_event('e2', category: 'Учёба'));
-    await storage.setString(
-      ScheduleMigrator.schemaVersionKey,
+    // Маркер пишется платформенным API, а не литералом: начиная с
+    // Этапа 9.1 формат записи принадлежит ModuleSchemaMarker, и тест,
+    // пишущий его вручную, проверял бы уже не тот формат, который
+    // читает приложение.
+    await ModuleSchemaMarker.write(
+      storage,
       ScheduleMigrator.currentSchemaVersion,
     );
     return <String>[work.id];
@@ -258,7 +263,7 @@ void main() {
       expect(events, hasLength(2));
       expect(events.firstWhere((e) => e.id == 'e1').categoryId, work.id);
       expect(
-        await storage.getString(ScheduleMigrator.schemaVersionKey),
+        await ModuleSchemaMarker.read(storage),
         ScheduleMigrator.currentSchemaVersion,
       );
     });
@@ -373,8 +378,11 @@ void main() {
         hasLength(2),
       );
       expect(entries.keys, contains('event:e1'));
+      // В архиве маркер лежит строкой — ModuleStorage хранит строки.
+      // Проверяется ровно то, что читает restore, а не то, что вернул
+      // бы int-константа: формат на диске задаёт ModuleSchemaMarker.
       expect(entries[ScheduleMigrator.schemaVersionKey],
-          ScheduleMigrator.currentSchemaVersion);
+          '${ScheduleMigrator.currentSchemaVersion}');
 
       final restored = _FakeModuleStorage();
       await ModuleStorageSerializer.deserialize(

@@ -9,6 +9,16 @@ import 'module_permission.dart';
 /// (Этап 8), не этого файла.
 const int kCoreModuleApiVersion = 1;
 
+/// Версия схемы данных, подразумеваемая, пока модуль о ней не
+/// говорит (Этап 9.1).
+///
+/// Модуль, который не объявил `schemaVersion`, ничего о структуре
+/// своих данных не менял: все данные, записанные до появления миграций,
+/// имеют исходную форму. Обратная договорённость («не объявил — значит
+/// новейшая») сделала бы каждый модуль, написанный до Этапа 9.1, требующим
+/// миграции, которой нет.
+const int kInitialModuleSchemaVersion = 1;
+
 /// Зависимость модуля от другого модуля.
 ///
 /// Только структура данных — само сравнение версий и разрешение
@@ -53,6 +63,21 @@ class ModuleManifest {
   final String author;
   final String description;
 
+  /// Версия структуры пользовательских данных модуля (Этап 9.1).
+  ///
+  /// Не путать с [version]: та — версия КОДА модуля (строгий
+  /// `X.Y.Z`, её сравнивает ModuleVersion), эта — версия ФОРМЫ его
+  /// данных в ModuleStorage. Модуль, изменивший структуру своих
+  /// данных, повышает счётчик здесь; какая версия фактически лежит
+  /// в хранилище — читается из маркера `schema:version`
+  /// (ModuleSchemaMarker).
+  ///
+  /// Целое число, а не строка и не `X.Y.Z`: это счётчик переносов, а
+  /// не версия публикации, и сравнивать его вручную пользователю не
+  /// нужно. [initialSchemaVersion] означает «данных никогда не
+  /// переносили».
+  final int schemaVersion;
+
   /// Идентификатор/имя иконки строкой, а не Flutter IconData —
   /// манифест должен разбираться из чужого JSON без зависимости
   /// от Flutter. Как строка превращается в отображаемую иконку —
@@ -68,6 +93,7 @@ class ModuleManifest {
     required this.version,
     required this.apiVersion,
     required this.author,
+    this.schemaVersion = kInitialModuleSchemaVersion,
     this.description = '',
     this.icon = '',
     this.permissions = const [],
@@ -100,6 +126,24 @@ class ModuleManifest {
       );
     }
 
+    // schemaVersion необязателен: его отсутствие в старом манифесте —
+    // это исходная форма данных, а не ошибка. Непустое и нецелое
+    // значение, наоборот, отвергается: молча превратив "2" в
+    // kInitialModuleSchemaVersion, мы бы решили, что перенос не
+    // нужен, и оставили бы данные в форме, которой новый код не
+    // понимает.
+    final schemaVersion = json['schemaVersion'] ?? kInitialModuleSchemaVersion;
+    if (schemaVersion is! int) {
+      throw const FormatException(
+        'ModuleManifest: поле "schemaVersion" должно быть целым числом',
+      );
+    }
+    if (schemaVersion < 1) {
+      throw const FormatException(
+        'ModuleManifest: поле "schemaVersion" должно быть не меньше 1',
+      );
+    }
+
     final permissionsJson = json['permissions'] as List<dynamic>? ?? const [];
     final dependenciesJson =
         json['dependencies'] as List<dynamic>? ?? const [];
@@ -110,6 +154,7 @@ class ModuleManifest {
       version: requireString('version'),
       apiVersion: apiVersion,
       author: requireString('author'),
+      schemaVersion: schemaVersion,
       description: json['description'] as String? ?? '',
       icon: json['icon'] as String? ?? '',
       permissions:
@@ -126,6 +171,11 @@ class ModuleManifest {
         'version': version,
         'apiVersion': apiVersion,
         'author': author,
+        // Только когда отличается от умолчания: иначе каждый нынешний
+        // модуль начал бы писать в манифест поле, которого там не было,
+        // и байты .phm менялись бы без изменения смысла.
+        if (schemaVersion != kInitialModuleSchemaVersion)
+          'schemaVersion': schemaVersion,
         if (description.isNotEmpty) 'description': description,
         if (icon.isNotEmpty) 'icon': icon,
         if (permissions.isNotEmpty)

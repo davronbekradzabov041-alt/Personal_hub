@@ -133,9 +133,12 @@ void main() {
     )));
 
     searchService = GlobalSearchService();
-    manager = ModuleManager(searchService: searchService);
-    store = _FakeModuleStateStore();
     storageFactory = _FakeModuleStorageFactory();
+    store = _FakeModuleStateStore();
+    manager = ModuleManager(
+      searchService: searchService,
+      storageFactory: storageFactory.call,
+    );
     persistence = ModuleStatePersistence(
       manager,
       store,
@@ -202,7 +205,10 @@ void main() {
     // "Перезапуск": новый ModuleManager поверх того же хранилища —
     // как при холодном старте приложения (main.dart создаёт менеджер
     // заново на каждый запуск, состояние переживает только в Isar).
-    final freshManager = ModuleManager(searchService: GlobalSearchService());
+    final freshManager = ModuleManager(
+      searchService: GlobalSearchService(),
+      storageFactory: storageFactory.call,
+    );
     await ModuleStateRestorer(freshManager, store).restore();
 
     expect(freshManager.stateOf('demo'), ModuleState.enabled);
@@ -214,7 +220,10 @@ void main() {
     await manager.disable('demo');
     await persistence.flush();
 
-    final freshManager = ModuleManager(searchService: GlobalSearchService());
+    final freshManager = ModuleManager(
+      searchService: GlobalSearchService(),
+      storageFactory: storageFactory.call,
+    );
     await ModuleStateRestorer(freshManager, store).restore();
 
     expect(freshManager.stateOf('demo'), ModuleState.disabled);
@@ -243,7 +252,12 @@ void main() {
     ModuleRegistry.clear();
     ModuleRegistry.register(_FailingEnableModule(manifest));
 
-    final freshManager = ModuleManager(searchService: GlobalSearchService());
+    final fakeStorageFactory = (String moduleId) => storageFactory.call(moduleId);
+
+    final freshManager = ModuleManager(
+      searchService: GlobalSearchService(),
+      storageFactory: fakeStorageFactory,
+    );
     final freshPersistence = ModuleStatePersistence(freshManager, store);
     await ModuleStateRestorer(freshManager, store).restore();
     await freshPersistence.flush();
@@ -274,7 +288,13 @@ void main() {
     ModuleRegistry.clear();
     ModuleRegistry.register(_FailingEnableModule(manifest));
 
-    final freshManager = ModuleManager(searchService: GlobalSearchService());
+    // Явно создаём функцию-фабрику, чтобы избежать проблем с tear-off.
+    final fakeStorageFactory = (String moduleId) => storageFactory.call(moduleId);
+
+    final freshManager = ModuleManager(
+      searchService: GlobalSearchService(),
+      storageFactory: fakeStorageFactory,
+    );
     final freshPersistence = ModuleStatePersistence(freshManager, store);
     final reported = <ModuleRestoreException>[];
     final restorer = ModuleStateRestorer(
@@ -307,7 +327,12 @@ void main() {
     ModuleRegistry.clear();
     ModuleRegistry.register(_FakeModule(manifest));
 
-    final nextManager = ModuleManager(searchService: GlobalSearchService());
+    final fakeStorageFactory2 = (String moduleId) => storageFactory.call(moduleId);
+
+    final nextManager = ModuleManager(
+      searchService: GlobalSearchService(),
+      storageFactory: fakeStorageFactory2,
+    );
     final nextPersistence = ModuleStatePersistence(nextManager, store);
     await nextPersistence.runRestoreTransaction(
       () => ModuleStateRestorer(nextManager, store).restore(),
@@ -324,7 +349,12 @@ void main() {
     await manager.enable('demo');
     await persistence.flush();
 
-    final freshManager = ModuleManager(searchService: GlobalSearchService());
+    final fakeStorageFactory = (String moduleId) => storageFactory.call(moduleId);
+
+    final freshManager = ModuleManager(
+      searchService: GlobalSearchService(),
+      storageFactory: fakeStorageFactory,
+    );
     final freshPersistence = ModuleStatePersistence(freshManager, store);
     await freshPersistence.runRestoreTransaction(
       () => ModuleStateRestorer(freshManager, store).restore(),
@@ -376,7 +406,12 @@ void main() {
     await persistence.flush();
 
     // Cold start: new ModuleManager + restore + ensureBuiltinModulesInstalled
-    final freshManager = ModuleManager(searchService: GlobalSearchService());
+    final fakeStorageFactory = (String moduleId) => storageFactory.call(moduleId);
+
+    final freshManager = ModuleManager(
+      searchService: GlobalSearchService(),
+      storageFactory: fakeStorageFactory,
+    );
     await ModuleStateRestorer(freshManager, store).restore();
     await ensureBuiltinModulesInstalled(freshManager, store);
 
@@ -500,7 +535,12 @@ void main() {
       await manager.disable('demo');
       await slowPersistence.flush();
 
-      final freshManager = ModuleManager(searchService: GlobalSearchService());
+      final fakeStorageFactory = (String moduleId) => storageFactory.call(moduleId);
+
+      final freshManager = ModuleManager(
+        searchService: GlobalSearchService(),
+        storageFactory: fakeStorageFactory,
+      );
       await ModuleStateRestorer(freshManager, slowStore).restore();
       expect(freshManager.stateOf('demo'), ModuleState.disabled);
     });

@@ -1,3 +1,7 @@
+import '../../core/modules/module_data_migration.dart';
+import '../../core/modules/module_migration_planner.dart';
+import '../../core/modules/module_migration_runner.dart';
+import '../../core/modules/module_schema_marker.dart';
 import '../../core/modules/module_storage.dart';
 import 'models/category.dart';
 import 'models/schedule_event.dart';
@@ -18,15 +22,30 @@ import 'schedule_repository.dart';
 /// Миграция превращает этот текст в полноценные категории: создаёт
 /// недостающие `category:<id>` и проставляет событиям ссылки.
 ///
+/// ## Отношение к Migration System (Этап 9.1)
+///
+/// Ключ `schema:version` и его разбор принадлежат теперь платформе
+/// ([ModuleSchemaMarker]), а не этому файлу: иначе у модуля и у
+/// платформы было бы по владельцу одного и того же маркера, и они
+/// разошлись бы при первом же нестандартном значении.
+///
+/// [schemaVersionKey] и [currentSchemaVersion] оставлены как
+/// тонкие ссылки на платформенные константы, потому что на них
+/// завязаны существующие тесты Schedule; владения у них больше нет.
+///
+/// Сам перенос вынесен в [ScheduleCategoriesMigration] —
+/// обычный шаг [ModuleDataMigration]. Это не переименование ради
+/// единообразия: шаг и его маркер — разные вещи. Шаг преобразует
+/// данные, а версию записывает вызывающий ([ModuleSchemaMarker.write]
+/// ниже), и именно поэтому прерванный на полпути перенос не может
+/// выглядеть как завершённый.
+///
 /// ## Почему версия, а не «посмотрел и ничего не сделал»
 ///
-/// [schemaVersionKey] — маркер версии данных модуля. Без него
-/// миграция запускалась бы на каждом холодном старте и каждой новой
-/// категории пришлось бы заново доказывать, что она уже перенесена.
-/// Маркер пишется ПОСЛЕДНИМ: пока его нет, работа считается
-/// незавершённой и будет повторена. Обратный порядок опаснее — запись
-/// маркера перед миграцией превратила бы прерванную на полпути
-/// миграцию в «успешно завершённую» навсегда.
+/// Пока маркера нет, работа считается незавершённой и будет повторена.
+/// Маркер пишется ПОСЛЕДНИМ: обратный порядок опаснее — запись
+/// маркера перед переносом превратила бы прерванную миграцию в
+/// «успешно завершённую» навсегда.
 ///
 /// ## Идемпотентность
 ///
@@ -53,18 +72,19 @@ class ScheduleMigrator {
 
   /// Ключ маркера версии данных модуля.
   ///
-  /// Префикс `schema:` выбран потому, что по нему сразу видно, что
-  /// ключ не принадлежит ни событиям, ни категориям: `keys()`
-  /// возвращает общие ключи модуля, и служебная запись не должна
-  /// выглядеть как часть данных.
-  static const String schemaVersionKey = 'schema:version';
+  /// Ссылка на платформенный [ModuleSchemaMarker.key], а не
+  /// собственный литерал: маркер один на всё приложение, и место,
+  /// где он назван, должно быть одно.
+  static const String schemaVersionKey = ModuleSchemaMarker.key;
 
   /// Текущая версия схемы данных Schedule.
   ///
-  /// Строка, а не число: [ModuleStorage] хранит строки, и сравнение
-  /// при чтении не должно зависеть от того, удалит ли кто-то
-  /// нечисловую запись. Повышается только этим числом.
-  static const String currentSchemaVersion = '2';
+  /// Число, а не строка, и не вычисляется из имени файла: версия
+  /// данных — целое число, и разбором строки занимается платформа
+  /// (ModuleSchemaMarker). Значение '2' означает ровно то же, что
+  /// значило раньше: данные после Этапа 7.2, с настоящими
+  /// категориями и ссылками на них.
+  static const int currentSchemaVersion = 2;
 
   final ModuleStorage _storage;
 
@@ -82,7 +102,7 @@ class ScheduleMigrator {
   ScheduleCategoryRepository get _categories =>
       _categoryRepository ??= ScheduleCategoryRepository(_storage);
 
-  /// Выполняет миграцию, если она ещё не выполнялась.
+  /// Выполняет перенос, если он ещё не выполнялся.
   ///
   /// Исключения НЕ перехватываются: вызывающий (ScheduleModule.onInstall)
   /// обязан решить, что делать с неудачей, и это решение не должно
@@ -91,10 +111,92 @@ class ScheduleMigrator {
   /// маркер не записан, поэтому следующий запуск продолжит работу с
   /// того же места.
   Future<ScheduleMigrationResult> run() async {
-    final stored = (await _storage.getString(schemaVersionKey))?.trim();
+    final stored = await ModuleSchemaMarker.read(_storage);
     if (stored == currentSchemaVersion) {
-      return ScheduleMigrationResult(previousVersion: stored);
+      return ScheduleMigrationResult(previousVersion: '$stored');
     }
+
+    final migration = ScheduleCategoriesMigration(
+      eventRepository: _events,
+      categoryRepository: _categories,
+    );
+
+    final plan = const ModuleMigrationPlanner().plan(
+      currentSchemaVersion: stored,
+      targetSchemaVersion: currentSchemaVersion,
+      migrations: <ModuleDataMigration>[migration],
+    );
+
+    final result = await const ModuleMigrationRunner().run(
+      plan: plan,
+      storage: _storage,
+    );
+
+    return ScheduleMigrationResult(
+      previousVersion: '$stored',
+      ran: result.executedSteps > 0,
+      createdCategories: migration.createdCategories,
+      linkedEvents: migration.linkedEvents,
+      detachedEvents: migration.detachedEvents,
+    );
+  }
+}
+
+/// Один шаг переноса данных Schedule: строковые категории → Category.
+///
+/// Объявлен [ModuleDataMigration], чтобы был ровно один владелец
+/// маркера (платформа) и один формат шага для всех модулей. Сам шаг
+/// маркер не пишет: [ModuleDataMigration.run] этого и не должен
+/// делать, решение о версии принимает вызыващий.
+class ScheduleCategoriesMigration implements ModuleDataMigration {
+  ScheduleCategoriesMigration({
+    ScheduleRepository? eventRepository,
+    ScheduleCategoryRepository? categoryRepository,
+  })  : _eventRepository = eventRepository,
+        _categoryRepository = categoryRepository;
+
+  /// Данные до Этапа 7.2: у события есть только строка категории.
+  @override
+  int get fromVersion => 1;
+
+  /// Данные после Этапа 7.2: настоящие Category и ссылка categoryId.
+  @override
+  int get toVersion => ScheduleMigrator.currentSchemaVersion;
+
+  /// Сколько категорий создано из старых строковых имён.
+  int createdCategories = 0;
+
+  /// Сколько событий получило ссылку.
+  int linkedEvents = 0;
+
+  /// Сколько висячих ссылок снято (восстановить их было нечем).
+  int detachedEvents = 0;
+
+  ScheduleRepository? _eventRepository;
+  ScheduleCategoryRepository? _categoryRepository;
+
+  ModuleStorage? _storage;
+
+  ScheduleRepository get _events =>
+      _eventRepository ??= ScheduleRepository(_requireStorage());
+
+  ScheduleCategoryRepository get _categories =>
+      _categoryRepository ??= ScheduleCategoryRepository(_requireStorage());
+
+  ModuleStorage _requireStorage() {
+    final storage = _storage;
+    if (storage == null) {
+      throw StateError(
+        'ScheduleCategoriesMigration.run() не вызывался — репозитории '
+        'неизвестны. Передайте их в конструктор или вызовите run().',
+      );
+    }
+    return storage;
+  }
+
+  @override
+  Future<void> run(ModuleStorage storage) async {
+    _storage = storage;
 
     final events = await _readEventsInStableOrder();
 
@@ -110,9 +212,9 @@ class ScheduleMigrator {
       byName.putIfAbsent(Category.nameKey(category.name), () => category);
     }
 
-    var createdCategories = 0;
-    var linkedEvents = 0;
-    var detachedEvents = 0;
+    var created = 0;
+    var linked = 0;
+    var detached = 0;
 
     // Шаг 1. Собрать имена в порядке первого появления и создать
     // недостающие категории.
@@ -140,7 +242,7 @@ class ScheduleMigrator {
       );
       byName[key] = category;
       existingIds.add(category.id);
-      createdCategories++;
+      created++;
     }
 
     // Шаг 2. Проставить ссылки событиям.
@@ -159,14 +261,14 @@ class ScheduleMigrator {
         // честно становится «без категории».
         if (dangling) {
           await _events.update(event.copyWith(categoryId: null));
-          detachedEvents++;
+          detached++;
         }
         continue;
       }
 
       if (link == target.id) continue;
       await _events.update(event.copyWith(categoryId: target.id));
-      linkedEvents++;
+      linked++;
     }
 
     // Шаг 3. Плотный порядок категорий 0..n-1.
@@ -179,17 +281,12 @@ class ScheduleMigrator {
       for (final category in ordered) category.id,
     ]);
 
-    // Шаг 4. Маркер версии — последним, и только когда всё остальное
-    // уже записано.
-    await _storage.setString(schemaVersionKey, currentSchemaVersion);
-
-    return ScheduleMigrationResult(
-      previousVersion: stored,
-      ran: true,
-      createdCategories: createdCategories,
-      linkedEvents: linkedEvents,
-      detachedEvents: detachedEvents,
-    );
+    // Счётчики заполняются только после того, как все шаги прошли:
+    // частично выполненный перенос не должен выглядеть как завершённый
+    // даже в отчёте.
+    createdCategories = created;
+    linkedEvents = linked;
+    detachedEvents = detached;
   }
 
   /// События в стабильном порядке: дата, время начала, id.
@@ -219,11 +316,11 @@ class ScheduleMigrator {
   }
 }
 
-/// Итог одной попытки миграции.
+/// Итог одной попытки переноса.
 ///
 /// Не типизированный union в духе `Either` и не void: вызывающему
-/// нужно знать, что миграция вообще не запускалась (маркер на месте)
-/// и что именно она изменила, чтобы написать об этом в лог, не
+/// нужно знать, что перенос вообще не запускался (маркер на месте)
+/// и что именно он изменил, чтобы написать об этом в лог, не
 /// разбирая хранилище заново.
 class ScheduleMigrationResult {
   const ScheduleMigrationResult({
@@ -234,8 +331,9 @@ class ScheduleMigrationResult {
     this.detachedEvents = 0,
   });
 
-  /// Что лежало в маркере до запуска; null — миграция не выполнялась
-  /// никогда (свежая установка либо данные из сборки до Этапа 7.1).
+  /// Что лежало в маркере до запуска; '1' — миграция не выполнялась
+  /// никогда (свежая установка либо данные из сборки до Этапа 7.1,
+  /// где маркера не было вовсе).
   final String? previousVersion;
 
   /// false — данные уже этой версии, запись не трогали.
