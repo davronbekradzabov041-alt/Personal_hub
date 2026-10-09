@@ -1,6 +1,7 @@
 import 'module_registry.dart';
 import '../../modules/example/example_module.dart';
 import '../../modules/schedule/schedule_module.dart';
+import '../../modules/accounts/accounts_module.dart';
 
 /// Единственное место, где модули подключаются к приложению.
 ///
@@ -10,11 +11,12 @@ import '../../modules/schedule/schedule_module.dart';
 ///
 /// Этап 14 добавил первый настоящий функциональный модуль —
 /// ScheduleModule — той же одной строкой, что и предсказывал этот
-/// комментарий. Финансы/Аккаунты/Файлы/AI/Бэкапы по-прежнему
-/// запрещены.
+/// комментарий. Этап 10.1 добавил AccountsModule. Финансы/Файлы/AI/Бэкапы
+/// по-прежнему запрещены.
 void registerCoreModules() {
   ModuleRegistry.registerAll([
     ExampleModule(),
     ScheduleModule(),
+    AccountsModule(),
   ]);
 }
