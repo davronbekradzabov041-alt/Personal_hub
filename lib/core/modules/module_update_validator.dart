@@ -137,25 +137,15 @@ class ModuleUpdateValidator {
 
     // --- Версия схемы данных ---
     //
-    // Считается по манифестам, а не по данным: [currentManifest] —
-    // установленный модуль, [newManifest] — новый. Сверять ещё и с
-    // маркером в хранилище этот валидатор не может и не должен: он
-    // чистый, без ввода-вывода, и одинаково вызывается обоими путями
-    // обновления. Фактическую форму данных проверяет исполнитель
-    // миграций (Этап 9.3).
+    // Считается по манифестам: [currentManifest] — установленный модуль,
+    // [newManifest] — новый. Валидатор чистый (нет ввода-вывода) и не
+    // может проверить маркер в хранилище. Факт миграции и её успех —
+    // задача ModuleMigrationRunner, который вызывается после swap реестра
+    // в ModuleManager.update и ModuleImporter.updateFromBytes.
     //
-    // Отказ, а не предупреждение: на Этапе 9.1 ни ModuleManager.update,
-    // ни ModuleImporter.updateFromBytes не переносят данные. Сменить
-    // код и оставить данные в старой форме — значит отдать пользователю
-    // модуль, который читает собственное хранилище и не понимает его.
-    if (newManifest.schemaVersion != currentManifest.schemaVersion) {
-      violations.add(ModuleUpdateViolation(
-        ModuleUpdateViolationCode.dataSchemaVersionChanged,
-        'новая версия ожидает схему данных ${newManifest.schemaVersion}, '
-        'а установленная схема ${currentManifest.schemaVersion} — '
-        'перенос данных на этом пути не выполняется',
-      ));
-    }
+    // Отказ убран на Этапе 9.3: миграция теперь выполняется платформой.
+    // Если план миграции построить нельзя, Runner бросит ошибку и update
+    // откатит реестр.
 
     violations.addAll(
       _dependencyViolations(newManifest, installedManifests),

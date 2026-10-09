@@ -1,26 +1,19 @@
-/// Path A обновления и схема данных (Этап 9.1).
+/// Path A обновления и схема данных (Этап 9.6).
 ///
-/// ## Почему отдельный файл
+/// На Этапе 9.3–9.4 миграция данных была реализована: ModuleManager.update
+/// и ModuleImporter.updateFromBytes теперь запускают миграцию через
+/// ModuleMigrationRunner после swap реестра. Валидатор больше НЕ отклоняет
+/// смену schemaVersion — он пропускает обновление, а Runner решает,
+/// можно ли выполнить миграцию (и если нет — откат реестра и ошибка).
 ///
-/// `ModuleManager.update()` — короткий путь подмены манифеста из
-/// доверенного каталога Module Store. Он не проходит через
-/// `ModuleImporter.updateFromBytes`, а значит не имеет ни снимка, ни
-/// обмена песочницы, ни отката.
-///
-/// На Этапе 9.1 ни один путь обновления не переносит данные. Для
-/// полного пути это пока безопасно (он и так всё делает правильно, а
-/// перенос появится в Этапах 9.3–9.4), но для Path A оставить
-/// `schemaVersion` без проверки означало бы тихую порчу данных:
-/// код сменяется, форма данных — нет.
-///
-/// ## Что проверяется
-///
-/// 1. смена `schemaVersion` через Path A отклоняется ДО обмена реестра;
-/// 2. отказ машинно-читаем (код нарушения), а не текстом;
-/// 3. смена версии кода при той же схеме по-прежнему разрешена —
-///    иначе проверка запрещала бы обычное обновление;
-/// 4. реестр после отказа остаётся прежним, данные не тронуты;
-/// 5. `_apiCache` сбрасывается после успешного обмена.
+/// Что проверяется:
+/// 1. Валидатор принимает смену schemaVersion (нет нарушения dataSchemaVersionChanged).
+/// 2. Обновление с другой схемой проходит валидацию, но если миграции нет —
+///    Runner бросает migrationMissing, реестр откатывается.
+/// 3. Обновление с той же схемой по-прежнему разрешено и не пишет в хранилище.
+/// 4. Реестр после неудачной миграции остаётся прежним, данные не тронуты.
+/// 5. _apiCache сбрасывается после успешного обмена, при неудаче миграции
+///    реестр откатывается и кэш пересоздаётся для старой версии.
 library module_update_schema_guard_test;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -33,13 +26,13 @@ import 'package:personal_hub/core/modules/module_registry.dart';
 import 'package:personal_hub/core/modules/module_state.dart';
 import 'package:personal_hub/core/modules/module_storage.dart';
 import 'package:personal_hub/core/modules/module_update_plan.dart';
+import 'package:personal_hub/core/modules/module_data_migration.dart';
 import 'package:personal_hub/core/modules/module_update_validator.dart';
 import 'package:personal_hub/core/search/global_search_service.dart';
 import 'package:personal_hub/core/search/search_provider.dart';
 import 'package:personal_hub/core/search/search_result.dart';
 
-/// Хранилище в памяти, считающее записи: обновление не имеет права
-/// ничего писать — ни в успешном случае, ни в отказном.
+/// Хранилище в памяти, считающее записи.
 class _CountingStorage implements ModuleStorage {
   final Map<String, String> data = <String, String>{};
   int setCalls = 0;
@@ -80,6 +73,36 @@ ModuleManifest _manifest(String version, {int schemaVersion = 1}) {
   });
 }
 
+/// Внешний модуль БЕЗ миграций — для тестов, где миграция должна НЕ найтись.
+class _ModuleNoMigrations extends ExternalModuleAdapter {
+  _ModuleNoMigrations(super.manifest);
+
+  @override
+  List<ModuleDataMigration> get dataMigrations => const <ModuleDataMigration>[];
+}
+
+/// Внешний модуль С миграцией 1->2 — для тестов успешной миграции.
+class _ModuleWithMigration extends ExternalModuleAdapter {
+  _ModuleWithMigration(super.manifest);
+
+  @override
+  List<ModuleDataMigration> get dataMigrations =>
+      <ModuleDataMigration>[_TestMigration()];
+}
+
+class _TestMigration implements ModuleDataMigration {
+  @override
+  int get fromVersion => 1;
+
+  @override
+  int get toVersion => 2;
+
+  @override
+  Future<void> run(ModuleStorage storage) async {
+    await storage.setString('migrated', 'true');
+  }
+}
+
 void main() {
   late _CountingStorage storage;
 
@@ -95,146 +118,30 @@ void main() {
         storageFactory: (_) => storage,
       );
 
-  group('Path A: смена схемы данных отклоняется', () {
-    test('обновление с другим schemaVersion отклонено', () async {
-      final manager = buildManager();
-      addTearDown(manager.dispose);
-
-      ModuleRegistry.register(ExternalModuleAdapter(_manifest('1.0.0')));
-      expect((await manager.tryInstall('notes')).isSuccess, isTrue);
-      storage.reset();
-
-      await expectLater(
-        manager.update(ExternalModuleAdapter(_manifest('1.1.0',
-            schemaVersion: 2))),
-        throwsA(isA<ModuleLifecycleError>()),
-        reason: 'Path A не переносит данные: смена схемы здесь означала бы '
-            'новый код поверх данных в старой форме',
-      );
-    });
-
-    test('отказ не трогает реестр — старая версия осталась на месте', () async {
-      final manager = buildManager();
-      addTearDown(manager.dispose);
-
-      ModuleRegistry.register(ExternalModuleAdapter(_manifest('1.0.0')));
-      await manager.tryInstall('notes');
-      storage.reset();
-
-      await expectLater(
-        manager.update(
-            ExternalModuleAdapter(_manifest('2.0.0', schemaVersion: 5))),
-        throwsA(isA<ModuleLifecycleError>()),
-      );
-
-      expect(ModuleRegistry.get('notes')!.manifest.version, '1.0.0');
-      expect(ModuleRegistry.get('notes')!.manifest.schemaVersion, 1);
-      expect(manager.stateOf('notes'), ModuleState.installed,
-          reason: 'отказ проверок не должен менять состояние модуля');
-    });
-
-    test('отказ не пишет в хранилище', () async {
-      final manager = buildManager();
-      addTearDown(manager.dispose);
-
-      ModuleRegistry.register(ExternalModuleAdapter(_manifest('1.0.0')));
-      await manager.tryInstall('notes');
-      await storage.setString('event:1', '{"id":"1"}');
-      final before = Map<String, String>.from(storage.data);
-      storage.reset();
-
-      await expectLater(
-        manager.update(
-            ExternalModuleAdapter(_manifest('1.1.0', schemaVersion: 2))),
-        throwsA(isA<ModuleLifecycleError>()),
-      );
-
-      expect(storage.setCalls, 0);
-      expect(storage.removeCalls, 0);
-      expect(storage.data, before);
-    });
-
-    test('понижение схемы тоже отклоняется', () async {
-      // Откат формы данных опаснее прямого обновления: старые данные
-      // не заменяются, они просто перестают соответствовать коду.
-      final manager = buildManager();
-      addTearDown(manager.dispose);
-
-      ModuleRegistry.register(
-          ExternalModuleAdapter(_manifest('1.2.0', schemaVersion: 3)));
-      await manager.tryInstall('notes');
-
-      await expectLater(
-        manager.update(
-            ExternalModuleAdapter(_manifest('1.1.0', schemaVersion: 1))),
-        throwsA(isA<ModuleLifecycleError>()),
-      );
-    });
-  });
-
-  group('Path A: смена версии кода при той же схеме разрешена', () {
-    test('обычное обновление продолжает работать', () async {
-      final manager = buildManager();
-      addTearDown(manager.dispose);
-
-      ModuleRegistry.register(ExternalModuleAdapter(_manifest('1.0.0')));
-      expect((await manager.tryInstall('notes')).isSuccess, isTrue);
-
-      await manager.update(
-          ExternalModuleAdapter(_manifest('1.1.0', schemaVersion: 1)));
-
-      expect(ModuleRegistry.get('notes')!.manifest.version, '1.1.0');
-      expect(manager.stateOf('notes'), ModuleState.installed);
-    });
-
-    test('обновление с той же схемой не пишет в хранилище', () async {
-      final manager = buildManager();
-      addTearDown(manager.dispose);
-
-      ModuleRegistry.register(ExternalModuleAdapter(_manifest('1.0.0')));
-      await manager.tryInstall('notes');
-      await storage.setString('event:1', '{"id":"1"}');
-      storage.reset();
-
-      await manager.update(
-          ExternalModuleAdapter(_manifest('1.1.0', schemaVersion: 1)));
-
-      expect(storage.setCalls, 0,
-          reason: 'обновление кода не трогает данные пользователя');
-      expect(storage.removeCalls, 0);
-    });
-  });
-
-  group('Валидатор: нарушение машинно-читаемо', () {
-    test('код dataSchemaVersionChanged появляется в плане', () {
-      // UI обязан решать по коду, а не разбирать русский текст (см.
-      // ModuleUpdatePlan): иначе правка формулировки тихо ломает экран.
+  group('Валидатор: смена schemaVersion принимается', () {
+    test('валидатор не выдаёт dataSchemaVersionChanged', () {
       final plan = ModuleUpdateValidator().validate(
         newManifest: _manifest('1.1.0', schemaVersion: 2),
         currentManifest: _manifest('1.0.0'),
       );
 
-      expect(plan.isAccepted, isFalse);
+      expect(plan.isAccepted, isTrue);
       expect(
         plan.violations.map((v) => v.code),
-        contains(ModuleUpdateViolationCode.dataSchemaVersionChanged),
+        isNot(contains(ModuleUpdateViolationCode.dataSchemaVersionChanged)),
       );
     });
 
-    test('схема без изменений нарушения не даёт', () {
+    test('схема без изменений — нарушений нет', () {
       final plan = ModuleUpdateValidator().validate(
         newManifest: _manifest('1.1.0'),
         currentManifest: _manifest('1.0.0'),
       );
 
       expect(plan.isAccepted, isTrue);
-      expect(plan.fromVersion!.toString(), '1.0.0');
-      expect(plan.toVersion!.toString(), '1.1.0');
     });
 
-    test('нарушение перечислено вместе с прочими, а не вместо них', () {
-      // Отказов бывает несколько сразу; показывать их по одному за
-      // попытку пользователю нельзя.
+    test('другие нарушения (uninstalled) всё равно ловятся', () {
       final plan = ModuleUpdateValidator().validate(
         newManifest: _manifest('1.1.0', schemaVersion: 2),
         currentManifest: _manifest('1.0.0'),
@@ -244,11 +151,123 @@ void main() {
       expect(plan.isAccepted, isFalse);
       expect(
         plan.violations.map((v) => v.code),
-        containsAll(<ModuleUpdateViolationCode>[
-          ModuleUpdateViolationCode.dataSchemaVersionChanged,
-          ModuleUpdateViolationCode.moduleNotInstalled,
-        ]),
+        contains(ModuleUpdateViolationCode.moduleNotInstalled),
       );
+      expect(
+        plan.violations.map((v) => v.code),
+        isNot(contains(ModuleUpdateViolationCode.dataSchemaVersionChanged)),
+      );
+    });
+  });
+
+  group('Path A: обновление с другой схемой — миграция через Runner', () {
+    test('модуль БЕЗ миграций: обновление падает с migrationMissing, реестр откат', () async {
+      final manager = buildManager();
+      addTearDown(manager.dispose);
+
+      ModuleRegistry.register(_ModuleNoMigrations(_manifest('1.0.0')));
+      await manager.tryInstall('notes');
+      storage.reset();
+
+      await expectLater(
+        manager.update(_ModuleNoMigrations(_manifest('1.1.0', schemaVersion: 2))),
+        throwsA(isA<ModuleLifecycleError>()),
+        reason: 'миграции нет — Runner бросает migrationMissing',
+      );
+
+      // Реестр откатился к старой версии
+      expect(ModuleRegistry.get('notes')!.manifest.version, '1.0.0');
+      expect(ModuleRegistry.get('notes')!.manifest.schemaVersion, 1);
+      expect(manager.stateOf('notes'), ModuleState.installed,
+          reason: 'состояние модуля не меняется');
+    });
+
+    test('модуль БЕЗ миграций: при неудаче миграции хранилище не тронуто', () async {
+      final manager = buildManager();
+      addTearDown(manager.dispose);
+
+      ModuleRegistry.register(_ModuleNoMigrations(_manifest('1.0.0')));
+      await manager.tryInstall('notes');
+      await storage.setString('event:1', '{"id":"1"}');
+      final before = Map<String, String>.from(storage.data);
+      storage.reset();
+
+      await expectLater(
+        manager.update(_ModuleNoMigrations(_manifest('1.1.0', schemaVersion: 2))),
+        throwsA(isA<ModuleLifecycleError>()),
+      );
+
+      // Хранилище не изменилось (миграция не запускалась, маркер не записан)
+      expect(storage.setCalls, 0);
+      expect(storage.removeCalls, 0);
+      expect(storage.data, before);
+    });
+
+    test('модуль С миграцией 1->2: обновление успешно, маркер записан', () async {
+      final manager = buildManager();
+      addTearDown(manager.dispose);
+
+      ModuleRegistry.register(_ModuleWithMigration(_manifest('1.0.0', schemaVersion: 1)));
+      await manager.tryInstall('notes');
+      storage.reset();
+
+      await manager.update(_ModuleWithMigration(_manifest('1.1.0', schemaVersion: 2)));
+
+      expect(ModuleRegistry.get('notes')!.manifest.version, '1.1.0');
+      expect(ModuleRegistry.get('notes')!.manifest.schemaVersion, 2);
+      expect(manager.stateOf('notes'), ModuleState.installed);
+      // Миграция записала маркер и данные
+      expect(storage.setCalls, greaterThan(0));
+      expect(storage.data['migrated'], 'true');
+    });
+
+    test('понижение схемы: Runner отклоняет (dataSchemaIncompatible)', () async {
+      final manager = buildManager();
+      addTearDown(manager.dispose);
+
+      ModuleRegistry.register(_ModuleWithMigration(_manifest('1.2.0', schemaVersion: 3)));
+      await manager.tryInstall('notes');
+      storage.reset();
+
+      await expectLater(
+        manager.update(_ModuleWithMigration(_manifest('1.1.0', schemaVersion: 1))),
+        throwsA(isA<ModuleLifecycleError>()),
+        reason: 'обратный перенос не поддерживается',
+      );
+
+      expect(ModuleRegistry.get('notes')!.manifest.version, '1.2.0');
+      expect(ModuleRegistry.get('notes')!.manifest.schemaVersion, 3);
+    });
+  });
+
+  group('Path A: смена версии кода при той же схеме', () {
+    test('обычное обновление продолжает работать', () async {
+      final manager = buildManager();
+      addTearDown(manager.dispose);
+
+      ModuleRegistry.register(_ModuleNoMigrations(_manifest('1.0.0')));
+      expect((await manager.tryInstall('notes')).isSuccess, isTrue);
+
+      await manager.update(_ModuleNoMigrations(_manifest('1.1.0', schemaVersion: 1)));
+
+      expect(ModuleRegistry.get('notes')!.manifest.version, '1.1.0');
+      expect(manager.stateOf('notes'), ModuleState.installed);
+    });
+
+    test('обновление с той же схемой не пишет в хранилище', () async {
+      final manager = buildManager();
+      addTearDown(manager.dispose);
+
+      ModuleRegistry.register(_ModuleNoMigrations(_manifest('1.0.0')));
+      await manager.tryInstall('notes');
+      await storage.setString('event:1', '{"id":"1"}');
+      storage.reset();
+
+      await manager.update(_ModuleNoMigrations(_manifest('1.1.0', schemaVersion: 1)));
+
+      expect(storage.setCalls, 0,
+          reason: 'обновление кода не трогает данные пользователя');
+      expect(storage.removeCalls, 0);
     });
   });
 
@@ -257,25 +276,19 @@ void main() {
       final manager = buildManager();
       addTearDown(manager.dispose);
 
-      ModuleRegistry.register(ExternalModuleAdapter(_manifest('1.0.0')));
+      ModuleRegistry.register(_ModuleNoMigrations(_manifest('1.0.0')));
       await manager.tryInstall('notes');
 
       final before = manager.apiFor('notes');
       await manager.update(
-          ExternalModuleAdapter(_manifest('1.1.0', schemaVersion: 1)));
+          _ModuleNoMigrations(_manifest('1.1.0', schemaVersion: 1)));
       final after = manager.apiFor('notes');
 
-      // Раньше кэш навсегда удерживал _ModuleApiImpl, созданный для
-      // ПРЕЖНЕГО Module, и проверка разрешений смотрела на манифест
-      // старой версии.
       expect(identical(before, after), isFalse,
           reason: 'кэш обязан быть сброшен: он удерживал старую версию');
     });
 
     test('добавленное новой версией разрешение действует сразу', () async {
-      // Самый наглядный признак устаревшего кэша: модуль, которому
-      // новая версия добавила core:search, не смог бы им
-      // воспользоваться, пока кэш смотрит в старый манифест.
       final search = GlobalSearchService();
       final manager = ModuleManager(
         searchService: search,
@@ -283,20 +296,18 @@ void main() {
       );
       addTearDown(manager.dispose);
 
-      ModuleRegistry.register(ExternalModuleAdapter(_manifest('1.0.0')));
+      ModuleRegistry.register(_ModuleNoMigrations(_manifest('1.0.0')));
       await manager.tryInstall('notes');
 
-      // 1.0.0 разрешения не имеет.
       expect(
         () => manager.apiFor('notes').registerSearchProvider(_NoopProvider()),
         throwsA(isA<ModuleLifecycleError>()),
       );
 
-      await manager.update(ExternalModuleAdapter(
+      await manager.update(_ModuleNoMigrations(
         _manifestWithPermission('1.1.0'),
       ));
 
-      // Теперь действуют права НОВОГО манифеста.
       manager.apiFor('notes').registerSearchProvider(_NoopProvider());
       expect(search.providerCount, 1);
     });
@@ -310,13 +321,12 @@ void main() {
       addTearDown(manager.dispose);
 
       ModuleRegistry.register(
-          ExternalModuleAdapter(_manifestWithPermission('1.0.0')));
+          _ModuleNoMigrations(_manifestWithPermission('1.0.0')));
       await manager.tryInstall('notes');
       manager.apiFor('notes').registerSearchProvider(_NoopProvider());
       expect(search.providerCount, 1);
 
-      // 1.1.0 разрешение убирает.
-      await manager.update(ExternalModuleAdapter(_manifest('1.1.0')));
+      await manager.update(_ModuleNoMigrations(_manifest('1.1.0')));
 
       expect(
         () => manager.apiFor('notes').registerSearchProvider(_NoopProvider()),
@@ -326,29 +336,26 @@ void main() {
       );
     });
 
-    test('отказ по схеме кэш НЕ сбрасывает', () async {
-      // Иначе неудачное обновление уничтожило бы работающий API
-      // модуля, который в реестре остался прежним.
+    test('при неудаче миграции реестр откатывается, кэш пересоздаётся для старой версии', () async {
       final manager = buildManager();
       addTearDown(manager.dispose);
 
-      ModuleRegistry.register(ExternalModuleAdapter(_manifest('1.0.0')));
+      ModuleRegistry.register(_ModuleNoMigrations(_manifest('1.0.0')));
       await manager.tryInstall('notes');
       final before = manager.apiFor('notes');
 
       await expectLater(
-        manager.update(
-            ExternalModuleAdapter(_manifest('1.1.0', schemaVersion: 2))),
+        manager.update(_ModuleNoMigrations(_manifest('1.1.0', schemaVersion: 2))),
         throwsA(isA<ModuleLifecycleError>()),
       );
 
-      expect(identical(manager.apiFor('notes'), before), isTrue);
+      // Реестр откатился, кэш пересоздан для старой версии (НОВЫЙ объект)
+      expect(identical(manager.apiFor('notes'), before), isFalse,
+          reason: 'после отката миграции кэш очищается и создаётся заново для старой версии');
     });
   });
 }
 
-/// Манифест с разрешением на поиск — версия, которая его либо имеет,
-/// либо нет.
 ModuleManifest _manifestWithPermission(String version) {
   return ModuleManifest.fromJson(<String, dynamic>{
     'id': 'notes',

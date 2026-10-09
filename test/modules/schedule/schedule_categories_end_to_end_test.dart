@@ -112,6 +112,8 @@ void main() {
     ModuleRegistry.register(ScheduleModule());
     await manager.install('schedule');
     await manager.enable('schedule');
+    // Миграция запускается платформой после восстановления состояния (Этап 9.3-9.4).
+    await manager.runPendingMigrations();
 
     final api = manager.apiFor('schedule');
     events = ScheduleRepository(api.storage);

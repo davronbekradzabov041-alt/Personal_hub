@@ -77,52 +77,8 @@ class ScheduleModule extends Module {
 
   @override
   Future<void> onInstall(ModuleApi api) async {
-    await _migrateStorage(api);
-  }
-
-  /// Переносит старые строковые категории событий в Category
-  /// (Этап 7.2).
-  ///
-  /// ## Почему onInstall, а не onEnable
-  ///
-  /// onInstall вызывается на КАЖДОМ холодном старте: ModuleStateRestorer
-  /// повторяет install() → enable() для состояния, восстановленного из
-  /// хранилища. update() хуки заново не зовёт, а ручной вызов миграции
-  /// из UI означал бы, что есть путь входа, где про неё забыли.
-  /// Плата — один [ScheduleMigrator] и чтение одного ключа маркера на
-  /// запуск модуля.
-  ///
-  /// ## Временность этого решения (Этап 9.1)
-  ///
-  /// Запуск миграции из хука — то, что Migration System в Этапах
-  /// 9.3–9.4 заменит вызовом исполнителя платформы. Оно остаётся
-  /// здесь намеренно: маркер и данные уже живут в общем формате
-  /// (ModuleSchemaMarker), а менять точку запуска до появления
-  /// исполнителя значило бы оставить модуль вовсе без переноса.
-  ///
-  /// ## Почему исключения перехватываются
-  ///
-  /// ModuleManager на ошибке в onInstall откатывает установку и стирает
-  /// хранилище модуля целиком (_rollbackFailedInstall). Неудачная
-  /// миграция не имеет права стоить пользователю всех событий, поэтому
-  /// падение превращается в запись в лог. Маркер при этом не пишется,
-  /// и следующий запуск повторяет миграцию с того же места.
-  Future<void> _migrateStorage(ModuleApi api) async {
-    try {
-      final result = await ScheduleMigrator(api.storage).run();
-      if (!result.ran) return;
-
-      debugPrint(
-        'Schedule: хранилище мигрировано '
-        '(${result.previousVersion ?? 'без версии'} → '
-        '${ScheduleMigrator.currentSchemaVersion}): '
-        'создано категорий ${result.createdCategories}, '
-        'привязано событий ${result.linkedEvents}, '
-        'снято висячих ссылок ${result.detachedEvents}',
-      );
-    } catch (error, stack) {
-      debugPrint('Schedule: миграция хранилища не завершена: $error\n$stack');
-    }
+    // Миграция выполняется платформой через runPendingMigrations (Этап 9.3-9.4).
+    // onInstall не запускает миграцию вручную — это был временный путь Этапа 9.1.
   }
 
   @override

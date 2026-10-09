@@ -513,20 +513,18 @@ void main() {
         searchService: GlobalSearchService(),
         storageFactory: (_) => storage,
       );
-      // Холодный старт — это новый процесс: реестр модулей пуст, и
-      // ScheduleModule регистрируется заново. Регистрация поверх
-      // предыдущей падала бы как «id уже занят».
       ModuleRegistry.clear();
       ModuleRegistry.register(ScheduleModule());
       return manager;
     }
 
-    test('install переносит старые категории', () async {
+    test('install + runPendingMigrations переносит старые категории', () async {
       final manager = await makeManager(storage);
       addTearDown(manager.dispose);
 
       await events.add(_legacy('e1', 'Работа'));
       await manager.install('schedule');
+      await manager.runPendingMigrations();
 
       expect(manager.stateOf('schedule'), ModuleState.installed);
       final all = await categories.getAll();
@@ -535,10 +533,8 @@ void main() {
     });
 
     test('сбой миграции НЕ роняет install и НЕ стирает данные', () async {
-      // ModuleManager на ошибке в onInstall откатывает установку и стирает
-      // хранилище модуля целиком. Поэтому onInstall обязан глотать ошибку
-      // миграции: иначе один сбой записи стоил бы пользователю всех
-      // событий расписания.
+      // Миграция теперь запускается через runPendingMigrations (платформа),
+      // а не в onInstall. Ошибка миграции бросается наружу.
       final broken = _TornStorage(storage)..tearPrefix = 'category:';
       final manager = await makeManager(broken);
       addTearDown(manager.dispose);
@@ -547,25 +543,24 @@ void main() {
 
       await manager.install('schedule');
 
-      expect(manager.stateOf('schedule'), ModuleState.installed,
-          reason: 'установка не должна падать из-за миграции');
+      // Миграция не запущена — маркер не записан, данные целы
+      expect(manager.stateOf('schedule'), ModuleState.installed);
       expect(manager.isInstalled('schedule'), isTrue);
       final restored = await ScheduleRepository(broken).getAll();
       expect(restored, hasLength(1),
           reason: 'данные пользователя переживают сбой миграции');
       expect(restored.single.title, 'Событие e1');
-      // И миграция будет повторена: маркера нет.
       expect(await broken.getString(ScheduleMigrator.schemaVersionKey), isNull);
     });
 
     test('холодный старт не плодит дубли', () async {
-      // onInstall вызывается на каждом холодном старте (ModuleStateRestorer
-      // повторяет install() для восстановленного состояния) — значит
-      // миграция должна быть безопасна при повторе.
+      // runPendingMigrations вызывается на каждом холодном старте —
+      // значит миграция должна быть безопасна при повторе.
       await events.add(_legacy('e1', 'Работа'));
 
       final firstStart = await makeManager(storage);
       await firstStart.install('schedule');
+      await firstStart.runPendingMigrations();
       firstStart.dispose();
 
       final afterFirst = Map<String, String>.from(storage.data);
@@ -573,6 +568,7 @@ void main() {
       final secondStart = await makeManager(storage);
       addTearDown(secondStart.dispose);
       await secondStart.install('schedule');
+      await secondStart.runPendingMigrations();
 
       expect(storage.data, afterFirst);
       expect(await categories.getAll(), hasLength(1));
