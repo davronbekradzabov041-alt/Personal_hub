@@ -6,12 +6,14 @@ import '../../core/modules/module_manager_scope.dart';
 import '../../core/modules/module_manifest.dart';
 import '../../core/modules/module_permission.dart';
 import '../../core/modules/module_state.dart';
+import 'account_repository.dart';
+import 'accounts_search_provider.dart';
+import 'category_repository.dart';
+import 'game_repository.dart';
 
-/// Каркас модуля Accounts — первый полноценный функциональный модуль.
+/// Модуль Accounts — управление аккаунтами игр и профилями.
 ///
-/// Этап 10.1: только минимальный скелет для проверки регистрации,
-/// lifecycle и интеграции с ModuleManager. CRUD, репозитории,
-/// категории и UI реализуются в следующих подэтапах.
+/// Этап 10.3: интеграция с lifecycle и поиском.
 class AccountsModule extends Module {
   static const ModuleManifest _manifest = ModuleManifest(
     id: 'accounts',
@@ -19,7 +21,7 @@ class AccountsModule extends Module {
     version: '0.1.0',
     apiVersion: kCoreModuleApiVersion,
     author: 'Personal Hub',
-    description: 'Управление аккаунтами игр и профилями (каркас Этапа 10.1).',
+    description: 'Управление аккаунтами игр и профилями (Этап 10.3).',
     schemaVersion: 1,
     permissions: [ModulePermission.coreSearch],
   );
@@ -36,6 +38,8 @@ class AccountsModule extends Module {
   @override
   List<ModuleDataMigration> get dataMigrations => const <ModuleDataMigration>[];
 
+  AccountsSearchProvider? _searchProvider;
+
   @override
   Future<void> onInstall(ModuleApi api) async {
     // Миграция (если будет) запускается платформой через runPendingMigrations.
@@ -43,24 +47,39 @@ class AccountsModule extends Module {
 
   @override
   Future<void> onEnable(ModuleApi api) async {
-    // SearchProvider будет добавлен в 10.3.
+    final provider = AccountsSearchProvider(
+      AccountRepository(api.storage),
+      GameRepository(api.storage, AccountRepository(api.storage), CategoryRepository(api.storage)),
+      CategoryRepository(api.storage),
+    );
+    _searchProvider = provider;
+    api.registerSearchProvider(provider);
   }
 
   @override
   Future<void> onDisable(ModuleApi api) async {
-    // Отписка от поиска будет добавлена в 10.3.
+    final provider = _searchProvider;
+    if (provider != null) {
+      api.unregisterSearchProvider(provider);
+      _searchProvider = null;
+    }
   }
 
   @override
   Future<void> onUninstall(ModuleApi api) async {
-    // Защитный дубль — см. ExampleModule.
+    // Защитный дубль — см. ExampleModule и ScheduleModule.
+    final provider = _searchProvider;
+    if (provider != null) {
+      api.unregisterSearchProvider(provider);
+      _searchProvider = null;
+    }
   }
 
   @override
   Widget buildPage(BuildContext context) => _AccountsModulePage(module: this);
 }
 
-/// Страница-заглушка модуля Accounts.
+/// Страница модуля Accounts.
 class _AccountsModulePage extends StatefulWidget {
   const _AccountsModulePage({required this.module});
   final AccountsModule module;
@@ -102,14 +121,13 @@ class _AccountsModulePageState extends State<_AccountsModulePage> {
               const Divider(),
               const SizedBox(height: 16),
               Text(
-                'Модуль Accounts (Этап 10.1) — каркас для проверки '
-                'регистрации, lifecycle и интеграции с ModuleManager.',
+                'Модуль Accounts (Этап 10.3) — интеграция с lifecycle и поиском.',
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
               const SizedBox(height: 16),
               Text(
                 'Функциональность: CRUD аккаунтов, игровые профили, '
-                'категории, поиск, Home-секция — реализуются в 10.2–10.8.',
+                'категории, поиск, Home-секция — реализуются в 10.4–10.8.',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).colorScheme.outline,
                 ),
