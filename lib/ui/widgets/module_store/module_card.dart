@@ -48,12 +48,22 @@ class ModuleCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(name, style: Theme.of(context).textTheme.titleMedium),
+                    // Длинное название режется, а не рвёт вёрстку:
+                    // карточка живёт в Column внутри Row с фиксированной
+                    // иконкой, и неограниченный текст расширял бы её.
+                    Text(
+                      name,
+                      style: Theme.of(context).textTheme.titleMedium,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                     Text(
                       'v$version · $author',
                       style: AppTypography.cardMetadata.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
@@ -92,7 +102,8 @@ class ModuleCard extends StatelessWidget {
             ),
           ],
           if (actions.isNotEmpty) ...[
-            SizedBox(height: AppSpacing.md),
+            // 12 dp до действий — по спецификации карточки модуля.
+            SizedBox(height: AppSpacing.space3),
             Wrap(spacing: AppSpacing.sm, runSpacing: AppSpacing.sm, children: actions),
           ],
         ],

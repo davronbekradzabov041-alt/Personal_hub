@@ -34,9 +34,15 @@ class AppTheme {
         ),
       ),
 
-      // Card
+      // Card — на ПРИПОДЯТОЙ поверхности, не на базовой.
+      //
+      // Раньше cardTheme.color был равен colorScheme.surface, то есть
+      // цвету фона Scaffold: в тёмной теме карточки визуально не
+      // отделялись от фона (аудит Stage 10). В Warm Bronze / Raw
+      // Tactile (Stage 11) поверхность `#21201D` и есть «приподнятая»
+      // ступень — ей и принадлежат карточки.
       cardTheme: CardThemeData(
-        color: colorScheme.surface,
+        color: colorScheme.surfaceContainerHighest,
         elevation: AppElevation.getLight(1),
         shadowColor: colorScheme.shadow.withValues(alpha: 0.1),
         surfaceTintColor: Colors.transparent,
@@ -290,8 +296,11 @@ class AppTheme {
       ),
 
       // Card
+      // Card — приподнятая поверхность `#21201D` (Raw Tactile, Stage 11),
+      // чтобы карточки читались на фоне `#181716`. Тень в тёмной теме
+      // почти не видна, поэтому разделение держится на цвете.
       cardTheme: CardThemeData(
-        color: colorScheme.surface,
+        color: colorScheme.surfaceContainerHighest,
         elevation: AppElevation.getDark(1),
         shadowColor: colorScheme.shadow.withValues(alpha: 0.3),
         surfaceTintColor: Colors.transparent,

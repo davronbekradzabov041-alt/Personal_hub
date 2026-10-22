@@ -26,7 +26,7 @@ import 'package:personal_hub/core/modules/external/external_module_adapter.dart'
 import 'package:personal_hub/core/modules/module_manifest.dart';
 import 'package:personal_hub/core/modules/module_schema_marker.dart';
 import 'package:personal_hub/core/modules/module_storage.dart';
-import 'package:personal_hub/modules/example/example_module.dart';
+import 'package:personal_hub/modules/accounts/accounts_module.dart';
 import 'package:personal_hub/modules/schedule/schedule_migrator.dart';
 import 'package:personal_hub/modules/schedule/schedule_module.dart';
 
@@ -189,7 +189,7 @@ void main() {
       // Проверяется на настоящем модуле, а не на синтетике: если бы
       // геттер требовал переопределения, об этом узнал бы только
       // анализ всего проекта, и новый модуль сначала не собрался бы.
-      expect(ExampleModule().dataMigrations, isEmpty);
+      expect(AccountsModule().dataMigrations, isEmpty);
     });
 
     test('Schedule объявляет свой шаг, а список не пуст', () {
@@ -351,12 +351,12 @@ void main() {
       await storage.setString('event:1', '{"id":"1"}');
       storage.reset();
 
-      final module = ExampleModule();
+      final module = AccountsModule();
       final current = await ModuleSchemaMarker.read(storage);
 
       expect(module.dataMigrations, isEmpty);
       expect(module.manifest.schemaVersion, current,
-          reason: 'ExampleModule ничего не переносил и не объявляет иного');
+          reason: 'AccountsModule ничего не переносил и не объявляет иного');
       expect(storage.setCalls, 0);
       expect(storage.removeCalls, 0);
     });

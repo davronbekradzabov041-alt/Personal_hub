@@ -24,7 +24,6 @@ class AvailableSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final manager = ModuleManagerScope.of(context);
-    final parser = ManifestParser();
 
     return ListenableBuilder(
       listenable: manager,
@@ -41,29 +40,42 @@ class AvailableSection extends StatelessWidget {
           );
         }
 
-        return Column(
-          children: available.map((entry) {
-            // Только для отображения карточки — структурный разбор,
-            // без валидации существующих id (это происходит заново,
-            // отдельно, в момент реальной установки ниже).
-            final manifest = parser.parse(entry.installManifestJson);
+        // Разделители 12 dp только МЕЖДУ карточками: вверху и внизу
+        // отступа нет — его задаёт список экрана «Модули», и второй
+        // уровень отступов дал бы неровные секции.
+        final cards = <Widget>[];
+        for (var index = 0; index < available.length; index++) {
+          if (index > 0) cards.add(const SizedBox(height: 12));
+          cards.add(_buildCard(context, manager, available[index]));
+        }
 
-            return ModuleCard(
-              icon: Icons.extension_outlined,
-              name: manifest.name,
-              version: manifest.version,
-              author: manifest.author,
-              permissions: manifest.permissions,
-              actions: [
-                AppComponents.filledButton(
-                  onPressed: () => _install(context, manager, entry),
-                  child: const Text('Установить'),
-                ),
-              ],
-            );
-          }).toList(),
-        );
+        return Column(children: cards);
       },
+    );
+  }
+
+  Widget _buildCard(
+    BuildContext context,
+    ModuleManager manager,
+    ModuleCatalogEntry entry,
+  ) {
+    // Только для отображения карточки — структурный разбор,
+    // без валидации существующих id (это происходит заново,
+    // отдельно, в момент реальной установки ниже).
+    final manifest = ManifestParser().parse(entry.installManifestJson);
+
+    return ModuleCard(
+      icon: Icons.extension_outlined,
+      name: manifest.name,
+      version: manifest.version,
+      author: manifest.author,
+      permissions: manifest.permissions,
+      actions: [
+        AppComponents.filledButton(
+          onPressed: () => _install(context, manager, entry),
+          child: const Text('Установить'),
+        ),
+      ],
     );
   }
 

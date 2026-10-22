@@ -5,6 +5,7 @@ import '../../ui/screens/search_screen.dart';
 import '../../ui/screens/modules_screen.dart';
 import '../../ui/screens/backup_screen.dart';
 import '../../modules/schedule/ui/schedule_screen.dart';
+import '../../modules/accounts/ui/accounts_screen.dart';
 
 /// Таблица именованных маршрутов ядра.
 ///
@@ -22,6 +23,7 @@ class AppRoutes {
   static const String modules = '/modules';
   static const String backup = '/backup';
   static const String schedule = '/schedule';
+  static const String accounts = '/accounts';
 
   /// Ключи таблицы — те же строки, что и константы выше.
   ///
@@ -36,6 +38,7 @@ class AppRoutes {
         modules: (context) => const ModulesScreen(),
         backup: (context) => const BackupScreen(),
         schedule: (context) => const ScheduleScreen(moduleId: 'schedule'),
+        accounts: (context) => const AccountsScreen(moduleId: 'accounts'),
       };
 
   /// Генератор маршрутов для MaterialApp.

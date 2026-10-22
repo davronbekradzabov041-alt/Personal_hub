@@ -1,5 +1,11 @@
 import 'package:flutter/material.dart';
 
+// Импорт намеренный: AppInsets.screen(context) делегирует в
+// AppBreakpoints, чтобы остаться единственной точкой входа для
+// отступов экрана. Кольцевая зависимость между библиотеками одного
+// пакета в Dart легальна — разрешается на уровне имён, а не файлов.
+import 'app_breakpoints.dart';
+
 /// Система отступов, радиусов, высот и границ Personal Hub.
 ///
 /// Все значения основаны на 8px grid (Material 3 baseline).
@@ -39,6 +45,15 @@ class AppSpacing {
   static const double drawerWidth = 304;       // Standard navigation drawer width
   static const double railWidth = 80;          // Navigation rail width
   static const double appBarHeight = 64;       // Standard AppBar height
+
+  // =========================================================================
+  // Нижняя навигация — плавающий док (_FloatingIslandDock в AppShell)
+  // =========================================================================
+  //
+  // Вынесены сюда, чтобы экраны не дублировали магические числа:
+  // просвет снизу считается из тех же констант, что и сам док.
+  static const double dockHeight = 64;        // высота панели дока
+  static const double dockBottomMargin = 16;  // его отступ от нижней кромки
 
   // =========================================================================
   // Elevation (for backward compatibility with ThemeData)
@@ -95,7 +110,69 @@ class AppInsets {
 
   static const EdgeInsets cardPadding = EdgeInsets.all(AppSpacing.space4);
   static const EdgeInsets cardPaddingMedium = EdgeInsets.all(AppSpacing.space5);
+
+  /// Единый стандарт отступов экрана (Stage 11).
+  ///
+  /// До Stage 11 каждый экран выбирал отступ сам: Home и секции
+  /// модулей использовали `AppSpacing.space7` (32), «Модули» —
+  /// `AppBreakpoints.screenPadding` (20/24/32/40), Настройки/Поиск/
+  /// Бэкап и все экраны Schedule и Accounts — `AppInsets.md` (16), а
+  /// StartupErrorScreen — литерал 24. На одном телефоне боковые
+  /// отступы получались 16 и 32 одновременно.
+  ///
+  /// Теперь единственный источник — [AppBreakpoints.screenPadding]:
+  /// адаптивный по ширине и общий для всех экранов и модулей.
+  /// `screenPadding` ниже оставлен как константа 16 для внутренних
+  /// контейнеров, где ширина экрана недоступна (диалоги, popup).
   static const EdgeInsets screenPadding = EdgeInsets.all(AppSpacing.space4);
+
+  /// Единый стандарт отступов тела экрана (Stage 11).  ///
+  /// Адаптивные БОКОВЫЕ отступы — общие для главной страницы, модулей,
+  /// настроек, поиска, резервных копий, Schedule и Accounts — плюс
+  /// прежняя вертикальная ритмика (16).
+  ///
+  /// Вертикальная часть намеренно НЕ адаптируется: непоследовательными
+  /// были именно боковые отступы (аудит Stage 10: Home 32, «Модули» 20,
+  /// остальные экраны 16). А вот высота прокручиваемого тела влияет на
+  /// то, что попадает в первый экран: меняя её, мы сдвигаем содержимое
+  /// относительно нижней грани viewport — этого делать незачем.
+  ///
+  /// Вызывать в корневом `padding:` прокручиваемого тела экрана и
+  /// вкладок. Не const — зависит от `MediaQuery`.
+  static EdgeInsets screenBody(BuildContext context) {
+    final side = AppBreakpoints.screenPadding(context);
+    return EdgeInsets.only(
+      left: side.left,
+      right: side.right,
+      top: AppSpacing.space4,
+      bottom: AppSpacing.space4,
+    );
+  }
+
+  /// Отступ экрана, адаптивный по ширине (Stage 11).
+  ///
+  /// Вызывать вместо [screenPadding] во всех корневых `padding:`
+  /// экранов и вкладок. Не const — зависит от `MediaQuery`.
+  static EdgeInsets screen(BuildContext context) =>
+      AppBreakpoints.screenPadding(context);
+
+  /// Нижний просвет, который обязан оставить прокручиваемый экран,
+  /// чтобы последний элемент не уезжал под плавающий док.
+  ///
+  /// Складывается из высоты дока + его нижнего отступа + системного
+  /// нижнего inset + 16 dp. Системный inset учитывается ровно один раз:
+  /// док получает его через собственный `SafeArea` и НЕ уменьшает
+  /// область контента, поэтому просчитать его обязан сам экран.
+  static EdgeInsets dockClearance(BuildContext context) {
+    final inset = MediaQuery.paddingOf(context).bottom;
+    return EdgeInsets.only(
+      bottom: AppSpacing.dockHeight +
+          AppSpacing.dockBottomMargin +
+          inset +
+          AppSpacing.space4,
+    );
+  }
+
   static const EdgeInsets sectionPadding = EdgeInsets.symmetric(
     horizontal: AppSpacing.space4,
     vertical: AppSpacing.space2,

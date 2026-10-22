@@ -96,7 +96,7 @@ class _BackupScreenState extends State<BackupScreen> {
         title: const Text('Резервные копии'),
       ),
       body: ListView(
-        padding: AppInsets.md,
+        padding: AppInsets.screenBody(context),
         children: [
           GlobalBackupSection(
             controller: _globalController,

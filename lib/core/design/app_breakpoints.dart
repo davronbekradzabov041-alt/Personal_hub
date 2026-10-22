@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'app_spacing.dart';
 
 /// Responsive breakpoints Personal Hub.
 ///

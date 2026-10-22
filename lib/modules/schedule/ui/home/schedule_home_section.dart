@@ -55,7 +55,10 @@ class _ScheduleHomeSectionState extends State<ScheduleHomeSection> {
   ScheduleCategoryRepository? _categoryRepository;
   List<ScheduleEvent> _events = <ScheduleEvent>[];
   List<Category> _categories = <Category>[];
-  ScheduleDaySummary? _daySummary;
+  ScheduleDaySummary _daySummary = const ScheduleDaySummary(
+    totalBusy: Duration.zero,
+    totalFree: Duration.zero,
+  );
   bool _loading = true;
 
   @override
@@ -104,15 +107,22 @@ class _ScheduleHomeSectionState extends State<ScheduleHomeSection> {
     final categoryRepository = _categoryRepository;
     if (repository == null || categoryRepository == null) return;
 
-    final events = await repository.getForDate(DateTime.now());
-    final categories = await categoryRepository.getAll();
-    if (!mounted) return;
-    setState(() {
-      _events = events;
-      _categories = categories;
-      _daySummary = ScheduleDaySummary.fromEvents(events);
-      _loading = false;
-    });
+    try {
+      final events = await repository.getForDate(DateTime.now());
+      final categories = await categoryRepository.getAll();
+      if (!mounted) return;
+      setState(() {
+        _events = events;
+        _categories = categories;
+        _daySummary = ScheduleDaySummary.fromEvents(events);
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+      });
+    }
   }
 
   Future<void> _openEventForm(ScheduleEvent event) async {
@@ -147,6 +157,10 @@ class _ScheduleHomeSectionState extends State<ScheduleHomeSection> {
     final now = DateTime.now();
     final currentMinutes = now.hour * 60 + now.minute;
     final resolver = CategoryResolver.of(_categories);
+    final screen = AppInsets.screen(context);
+    // Просвет под плавающим доком: его высота + отступ + системный
+    // inset + 16 dp. Без него хвост повестки уезжал под навигацию.
+    final dock = AppInsets.dockClearance(context);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -154,14 +168,20 @@ class _ScheduleHomeSectionState extends State<ScheduleHomeSection> {
         // ===== TODAY HERO =====
         TodayHero(
           events: _events,
-          daySummary: _daySummary!,
+          daySummary: _daySummary,
           onNavigateToSchedule: _openSchedule,
         ),
         // ===== TIMELINE STRIP =====
+        // Единый адаптивный стандарт отступа экрана (Stage 11): было
+        // `AppSpacing.space7` (32) — Главная была вдвое шире остальных
+        // экранов. Внизу — просвет под плавающий док, иначе хвост
+        // таймлайна и повестки уезжали под навигацию.
         Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.space7,
-            vertical: AppSpacing.space4,
+          padding: EdgeInsets.only(
+            left: screen.left,
+            right: screen.right,
+            top: AppSpacing.space4,
+            bottom: AppSpacing.space4 + dock.bottom,
           ),
           child: TimelineStrip(
             events: _events,
@@ -172,9 +192,11 @@ class _ScheduleHomeSectionState extends State<ScheduleHomeSection> {
         ),
         // ===== UPCOMING AGENDA =====
         Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.space7,
-            vertical: AppSpacing.space4,
+          padding: EdgeInsets.only(
+            left: screen.left,
+            right: screen.right,
+            top: AppSpacing.space4,
+            bottom: dock.bottom,
           ),
           child: UpcomingAgenda(
             events: _events,

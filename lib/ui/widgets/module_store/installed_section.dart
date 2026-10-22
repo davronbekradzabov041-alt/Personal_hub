@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:typed_data';
+import '../../../../core/modules/module_manager.dart';
+import '../../../../core/modules/module.dart';
 import '../../../../core/modules/module_manager_scope.dart';
 import '../../../../core/modules/module_registry.dart';
 import '../../../../core/modules/module_state.dart';
@@ -38,65 +40,85 @@ class InstalledSection extends StatelessWidget {
           );
         }
 
-        return Column(
-          children: installed.map((module) {
-            final state = manager.stateOf(module.id)!;
-            final isExternal = module is ExternalModuleAdapter;
-            
-            final actions = <Widget>[
-              AppComponents.outlinedButton(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: module.buildPage),
-                ),
-                child: const Text('Открыть'),
-              ),
-              if (state == ModuleState.installed ||
-                  state == ModuleState.disabled)
-                AppComponents.filledButton(
-                  onPressed: () => runModuleAction(
-                    context,
-                    () => manager.enable(module.id),
-                  ),
-                  child: const Text('Включить'),
-                ),
-              if (state == ModuleState.enabled)
-                AppComponents.outlinedButton(
-                  onPressed: () => runModuleAction(
-                    context,
-                    () => manager.disable(module.id),
-                  ),
-                  child: const Text('Выключить'),
-                ),
-              if (state == ModuleState.installed ||
-                  state == ModuleState.disabled)
-                AppComponents.textButton(
-                  onPressed: () => runModuleAction(
-                    context,
-                    () => manager.uninstall(module.id),
-                  ),
-                  child: const Text('Удалить'),
-                ),
-              // Export action for external modules
-              if (isExternal)
-                AppComponents.outlinedButton(
-                  onPressed: () => _showExportDialog(context, module.id),
-                  child: const Text('Экспорт'),
-                ),
-            ];
+        // Карточки модулей с равным зазором 12 dp.
+        //
+        // `ListView.separated` здесь не подходит: секция встроена в общий
+        // `ListView` экрана «Модули», а в тестах показывается внутри
+        // `Scaffold` без скроллера. Вложенный скроллер с неограниченной
+        // высотой сломал бы вёрстку, поэтому взят эквивалент — тот же
+        // зазор между карточками, но без дублирования отступов: его нет
+        // ни сверху, ни снизу списка, только МЕЖДУ соседями.
+        final cards = <Widget>[];
+        for (var index = 0; index < installed.length; index++) {
+          if (index > 0) cards.add(const SizedBox(height: 12));
+          cards.add(_buildModuleCard(context, manager, installed[index]));
+        }
 
-            return ModuleCard(
-              icon: module.icon,
-              name: module.title,
-              version: module.manifest.version,
-              author: module.manifest.author,
-              permissions: module.manifest.permissions,
-              stateLabel: _stateLabel(state),
-              actions: actions,
-            );
-          }).toList(),
-        );
+        return Column(children: cards);
       },
     );
+  }
+
+  Widget _buildModuleCard(
+    BuildContext context,
+    ModuleManager manager,
+    Module module,
+  ) {
+    {
+      final state = manager.stateOf(module.id)!;
+      final isExternal = module is ExternalModuleAdapter;
+
+      final actions = <Widget>[
+        AppComponents.outlinedButton(
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: module.buildPage),
+          ),
+          child: const Text('Открыть'),
+        ),
+        if (state == ModuleState.installed ||
+            state == ModuleState.disabled)
+          AppComponents.filledButton(
+            onPressed: () => runModuleAction(
+              context,
+              () => manager.enable(module.id),
+            ),
+            child: const Text('Включить'),
+          ),
+        if (state == ModuleState.enabled)
+          AppComponents.outlinedButton(
+            onPressed: () => runModuleAction(
+              context,
+              () => manager.disable(module.id),
+            ),
+            child: const Text('Выключить'),
+          ),
+        if (state == ModuleState.installed ||
+            state == ModuleState.disabled)
+          AppComponents.textButton(
+            onPressed: () => runModuleAction(
+              context,
+              () => manager.uninstall(module.id),
+            ),
+            child: const Text('Удалить'),
+          ),
+        // Export action for external modules
+        if (isExternal)
+          AppComponents.outlinedButton(
+            onPressed: () => _showExportDialog(context, module.id),
+            child: const Text('Экспорт'),
+          ),
+      ];
+
+      return ModuleCard(
+        icon: module.icon,
+        name: module.title,
+        version: module.manifest.version,
+        author: module.manifest.author,
+        permissions: module.manifest.permissions,
+        stateLabel: _stateLabel(state),
+        actions: actions,
+      );
+    }
   }
 
   void _showExportDialog(BuildContext context, String moduleId) {

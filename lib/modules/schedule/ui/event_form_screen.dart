@@ -318,7 +318,7 @@ class _EventFormScreenState extends State<EventFormScreen> {
         ],
       ),
       body: ListView(
-        padding: AppInsets.md,
+        padding: AppInsets.screenBody(context),
         children: [
           AppComponents.textField(
             controller: _titleController,

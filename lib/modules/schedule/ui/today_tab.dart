@@ -80,25 +80,40 @@ class _TodayTabState extends State<TodayTab> {
         return RefreshIndicator(
           onRefresh: () async => setState(_reload),
           child: ListView(
-            padding: AppInsets.md,
+            padding: AppInsets.screenBody(context),
             children: [
               AppComponents.card(
+                // Без вложенного Padding: AppComponents.card уже даёт
+                // внутренний отступ 16 dp, и второй такой же внутри
+                // доводил ширину содержимого до 32+32 на 360 dp —
+                // отсюда был RenderFlex overflow на 8.2 px.
                 child: Padding(
-                  padding: AppInsets.md,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.space4,
+                    vertical: AppSpacing.space2,
+                  ),
                   child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    // spaceAround распределял остаток ширины с округлением
+                    // и давал sub-pixel overflow (0.2 px) на 360 dp.
+                    // Expanded делит ширину ровно и overflow исключает.
                     children: [
-                      _SummaryStat(
-                        label: 'Занято',
-                        value: _formatDuration(summary.totalBusy),
+                      Expanded(
+                        child: _SummaryStat(
+                          label: 'Занято',
+                          value: _formatDuration(summary.totalBusy),
+                        ),
                       ),
-                      _SummaryStat(
-                        label: 'Свободно',
-                        value: _formatDuration(summary.totalFree),
+                      Expanded(
+                        child: _SummaryStat(
+                          label: 'Свободно',
+                          value: _formatDuration(summary.totalFree),
+                        ),
                       ),
-                      _SummaryStat(
-                        label: 'Событий',
-                        value: events.length.toString(),
+                      Expanded(
+                        child: _SummaryStat(
+                          label: 'Событий',
+                          value: events.length.toString(),
+                        ),
                       ),
                     ],
                   ),

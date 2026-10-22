@@ -46,7 +46,7 @@ class _SearchScreenState extends State<SearchScreen> {
         children: [
           // Search field - moved from AppBar to body
           Padding(
-            padding: AppInsets.md,
+            padding: AppInsets.screenBody(context),
             child: AppComponents.textField(
               controller: _controller,
               hintText: 'Поиск…',

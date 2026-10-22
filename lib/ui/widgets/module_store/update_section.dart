@@ -63,26 +63,37 @@ class UpdateSection extends StatelessWidget {
           );
         }
 
-        return Column(
-          children: updates.map((u) {
-            final (entry, current, latest) = u;
-            return ModuleCard(
-              icon: Icons.extension_outlined,
-              name: latest.name,
-              version: current.version,
-              author: latest.author,
-              permissions: latest.permissions,
-              trailingInfo: 'Текущая ${current.version} → новая ${latest.version}',
-              actions: [
-                AppComponents.filledButton(
-                  onPressed: () => _update(context, manager, latest),
-                  child: const Text('Обновить'),
-                ),
-              ],
-            );
-          }).toList(),
-        );
+        // Разделители 12 dp между карточками — как в «Доступных».
+        final cards = <Widget>[];
+        for (var index = 0; index < updates.length; index++) {
+          if (index > 0) cards.add(const SizedBox(height: 12));
+          cards.add(_buildCard(context, manager, updates[index]));
+        }
+
+        return Column(children: cards);
       },
+    );
+  }
+
+  Widget _buildCard(
+    BuildContext context,
+    ModuleManager manager,
+    (ModuleCatalogEntry, ModuleManifest, ModuleManifest) update,
+  ) {
+    final (entry, current, latest) = update;
+    return ModuleCard(
+      icon: Icons.extension_outlined,
+      name: latest.name,
+      version: current.version,
+      author: latest.author,
+      permissions: latest.permissions,
+      trailingInfo: 'Текущая ${current.version} → новая ${latest.version}',
+      actions: [
+        AppComponents.filledButton(
+          onPressed: () => _update(context, manager, latest),
+          child: const Text('Обновить'),
+        ),
+      ],
     );
   }
 

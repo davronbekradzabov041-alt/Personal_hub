@@ -1,5 +1,4 @@
 import 'module_registry.dart';
-import '../../modules/example/example_module.dart';
 import '../../modules/schedule/schedule_module.dart';
 import '../../modules/accounts/accounts_module.dart';
 
@@ -11,11 +10,17 @@ import '../../modules/accounts/accounts_module.dart';
 ///
 /// Этап 14 добавил первый настоящий функциональный модуль —
 /// ScheduleModule — той же одной строкой, что и предсказывал этот
-/// комментарий. Этап 10.1 добавил AccountsModule. Финансы/Файлы/AI/Бэкапы
-/// по-прежнему запрещены.
+/// комментарий. Этап 10.1 добавил AccountsModule.
+///
+/// Демонстрационный ExampleModule удалён: он существовал как образец
+/// контракта Module на время, когда других модулей не было. Теперь
+/// есть настоящие модули (Schedule, Accounts), и проверять на них
+/// честнее, чем держать в поставке модуль-заглушку. Общие механизмы
+/// (registry, lifecycle, хранилище, поиск, Module Store, бэкап),
+/// которые он демонстрировал, остались на месте и покрыты тестами.
+/// Финансы/Файлы/AI/Бэкапы по-прежнему запрещены.
 void registerCoreModules() {
   ModuleRegistry.registerAll([
-    ExampleModule(),
     ScheduleModule(),
     AccountsModule(),
   ]);

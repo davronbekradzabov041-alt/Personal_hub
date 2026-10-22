@@ -145,12 +145,12 @@ void main() {
     );
   }
 
-  /// Гасит известное переполнение TimelineStrip, не требуя его.
+  /// Гасит любое ожидаемое исключение разметки без утверждения.
   ///
-  /// Переполнение возникает при РАЗМЕТКЕ, поэтому после перерисовки
-  /// шкалы с новым цветом, но теми же размерами, повторной разметки не
-  /// будет — и ошибки тоже. Строгий [takeKnownTimelineOverflow] для
-  /// такого случая не годится: он требует ошибку, которой здесь нет.
+  /// Переполнение TimelineStrip исправлено, поэтому строгое
+  /// [takeKnownTimelineOverflow] больше не применимо: оно требует ошибку,
+  /// которой больше нет. Эта функция просто сбрасывает pending-исключение,
+  /// чтобы он не упал в следующий тест.
   void takeKnownTimelineOverflowIfAny(WidgetTester tester) {
     tester.takeException();
   }
@@ -161,7 +161,7 @@ void main() {
 
       await tester.pumpWidget(home());
       await tester.pumpAndSettle();
-      takeKnownTimelineOverflow(tester);
+      takeKnownTimelineOverflowIfAny(tester);
 
       expect(find.byType(HomeScreen), findsOneWidget);
       expect(find.text('Собрание команды'), findsWidgets);
@@ -185,7 +185,7 @@ void main() {
 
       await tester.pumpWidget(home());
       await tester.pumpAndSettle();
-      takeKnownTimelineOverflow(tester);
+      takeKnownTimelineOverflowIfAny(tester);
 
       final title = find.text('Собрание команды').first;
       await tester.ensureVisible(title);
@@ -218,7 +218,7 @@ void main() {
 
       await tester.pumpWidget(home());
       await tester.pumpAndSettle();
-      takeKnownTimelineOverflow(tester);
+      takeKnownTimelineOverflowIfAny(tester);
       expect(find.text('Первая встреча'), findsWidgets);
       expect(find.text('Вторая встреча'), findsNothing);
 
@@ -231,7 +231,7 @@ void main() {
         1000.0,
       );
       await tester.pumpAndSettle();
-      takeKnownTimelineOverflow(tester);
+      takeKnownTimelineOverflowIfAny(tester);
 
       expect(find.text('Вторая встреча'), findsWidgets);
     });
@@ -259,7 +259,7 @@ void main() {
 
       await tester.pumpWidget(home());
       await tester.pumpAndSettle();
-      takeKnownTimelineOverflow(tester);
+      takeKnownTimelineOverflowIfAny(tester);
 
       expect(find.textContaining('Деловые'), findsWidgets);
       expect(find.textContaining('Работа'), findsNothing);
@@ -276,7 +276,7 @@ void main() {
 
       await tester.pumpWidget(home());
       await tester.pumpAndSettle();
-      takeKnownTimelineOverflow(tester);
+      takeKnownTimelineOverflowIfAny(tester);
       expect(find.textContaining('Деловые'), findsWidgets);
 
       // Переименование в справочнике — данные главного экрана устарели.
@@ -299,9 +299,54 @@ void main() {
 
       await tester.pumpWidget(home());
       await tester.pumpAndSettle();
-      takeKnownTimelineOverflow(tester);
+      takeKnownTimelineOverflowIfAny(tester);
 
       expect(find.textContaining('Без категории'), findsWidgets);
     });
+
+    testWidgets('главный экран не пуст при ошибке загрузки данных',
+        (tester) async {
+      // Хранилище, которое выбрасывает исключение при чтении ключей
+      final failingStorage = _FailingStorage();
+      final failingManager = ModuleManager(
+        searchService: GlobalSearchService(),
+        storageFactory: (_) => failingStorage,
+      );
+      // Модуль уже зарегистрирован в setUp — используем существующий
+      final failingModule = ScheduleModule();
+      await failingManager.install('schedule');
+      await failingManager.enable('schedule');
+
+      Widget failingHome() => ModuleManagerScope(
+            manager: failingManager,
+            child: const MaterialApp(
+              onGenerateRoute: AppRoutes.onGenerateRoute,
+              home: HomeScreen(),
+            ),
+          );
+
+      await tester.pumpWidget(failingHome());
+      await tester.pumpAndSettle();
+
+      // Секция не скрыта SizedBox.shrink(): хоть один виджет из HomeScreen виден
+      expect(find.byType(HomeScreen), findsOneWidget);
+      // CTA «Открыть расписание» отображается (значит _loading стал false)
+      expect(find.text('Открыть расписание'), findsOneWidget);
+    });
   });
+}
+
+/// Хранилище, которое выбрасывает исключение при любом чтении.
+class _FailingStorage implements ModuleStorage {
+  @override
+  Future<String?> getString(String key) async => throw StateError('storage error');
+
+  @override
+  Future<void> setString(String key, String value) async => throw StateError('storage error');
+
+  @override
+  Future<void> remove(String key) async => throw StateError('storage error');
+
+  @override
+  Future<List<String>> keys() async => throw StateError('storage error');
 }

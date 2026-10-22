@@ -503,7 +503,13 @@ class AppComponents {
   }) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final accent = accentColor ?? AppColors.getModuleAccent('default');
+    // Акцент по умолчанию — primary темы, а не getModuleAccent('default').
+    //
+    // 'default' не является moduleId и не входит в moduleAccents, поэтому
+    // вызов всегда возвращал accentIndigo `#1F2438` (аудит Stage 10):
+    // на тёмном фоне это практически невидимый цвет рамки. Primary
+    // теперь бронзовый — выбранное состояние читается (Stage 11).
+    final accent = accentColor ?? theme.colorScheme.primary;
     
     return AnimatedContainer(
       duration: AppAnimations.getDuration(context, AppSpacing.durationStandard),

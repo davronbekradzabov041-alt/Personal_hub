@@ -1,27 +1,28 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
+import '../../core/modules/home_section.dart';
 import '../../core/modules/module.dart';
 import '../../core/modules/module_api.dart';
 import '../../core/modules/module_data_migration.dart';
-import '../../core/modules/module_manager_scope.dart';
 import '../../core/modules/module_manifest.dart';
 import '../../core/modules/module_permission.dart';
-import '../../core/modules/module_state.dart';
 import 'account_repository.dart';
 import 'accounts_search_provider.dart';
 import 'category_repository.dart';
 import 'game_repository.dart';
+import 'ui/accounts_screen.dart';
+import 'ui/home/accounts_home_section.dart';
 
-/// Модуль Accounts — управление аккаунтами игр и профилями.
+/// РњРѕРґСѓР»СЊ Accounts вЂ” СѓРїСЂР°РІР»РµРЅРёРµ Р°РєРєР°СѓРЅС‚Р°РјРё РёРіСЂ Рё РїСЂРѕС„РёР»СЏРјРё.
 ///
-/// Этап 10.3: интеграция с lifecycle и поиском.
+/// Р­С‚Р°Рї 10.4: РїРѕР»РЅС‹Р№ UI РјРѕРґСѓР»СЏ.
 class AccountsModule extends Module {
   static const ModuleManifest _manifest = ModuleManifest(
     id: 'accounts',
-    name: 'Аккаунты',
-    version: '0.1.0',
+    name: 'РђРєРєР°СѓРЅС‚С‹',
+    version: '0.2.0',
     apiVersion: kCoreModuleApiVersion,
     author: 'Personal Hub',
-    description: 'Управление аккаунтами игр и профилями (Этап 10.3).',
+    description: 'РЈРїСЂР°РІР»РµРЅРёРµ Р°РєРєР°СѓРЅС‚Р°РјРё РёРіСЂ, РїСЂРѕС„РёР»СЏРјРё Рё РєР°С‚РµРіРѕСЂРёСЏРјРё.',
     schemaVersion: 1,
     permissions: [ModulePermission.coreSearch],
   );
@@ -42,7 +43,7 @@ class AccountsModule extends Module {
 
   @override
   Future<void> onInstall(ModuleApi api) async {
-    // Миграция (если будет) запускается платформой через runPendingMigrations.
+    // РњРёРіСЂР°С†РёСЏ (РµСЃР»Рё Р±СѓРґРµС‚) Р·Р°РїСѓСЃРєР°РµС‚СЃСЏ РїР»Р°С‚С„РѕСЂРјРѕР№ С‡РµСЂРµР· runPendingMigrations.
   }
 
   @override
@@ -67,7 +68,7 @@ class AccountsModule extends Module {
 
   @override
   Future<void> onUninstall(ModuleApi api) async {
-    // Защитный дубль — см. ExampleModule и ScheduleModule.
+    // Р—Р°С‰РёС‚РЅС‹Р№ РґСѓР±Р»СЊ.
     final provider = _searchProvider;
     if (provider != null) {
       api.unregisterSearchProvider(provider);
@@ -76,81 +77,7 @@ class AccountsModule extends Module {
   }
 
   @override
-  Widget buildPage(BuildContext context) => _AccountsModulePage(module: this);
+  Widget buildPage(BuildContext context) => AccountsScreen(moduleId: id);
 }
 
-/// Страница модуля Accounts.
-class _AccountsModulePage extends StatefulWidget {
-  const _AccountsModulePage({required this.module});
-  final AccountsModule module;
 
-  @override
-  State<_AccountsModulePage> createState() => _AccountsModulePageState();
-}
-
-class _AccountsModulePageState extends State<_AccountsModulePage> {
-  @override
-  Widget build(BuildContext context) {
-    final manager = ModuleManagerScope.of(context);
-    final id = widget.module.id;
-
-    return ListenableBuilder(
-      listenable: manager,
-      builder: (context, _) {
-        final state = manager.stateOf(id);
-
-        return Scaffold(
-          appBar: AppBar(title: Text(widget.module.title)),
-          body: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              Text(
-                'Состояние модуля: ${_stateLabel(state)}',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Версия ${widget.module.manifest.version} · '
-                'API ${widget.module.manifest.apiVersion} · '
-                'Schema ${widget.module.manifest.schemaVersion}',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 24),
-              const Divider(),
-              const SizedBox(height: 16),
-              Text(
-                'Модуль Accounts (Этап 10.3) — интеграция с lifecycle и поиском.',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Функциональность: CRUD аккаунтов, игровые профили, '
-                'категории, поиск, Home-секция — реализуются в 10.4–10.8.',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.outline,
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  String _stateLabel(ModuleState? state) {
-    switch (state) {
-      case null:
-        return 'не установлен';
-      case ModuleState.installed:
-        return 'установлен';
-      case ModuleState.enabled:
-        return 'включён';
-      case ModuleState.disabled:
-        return 'выключен';
-      case ModuleState.uninstalled:
-        return 'удалён';
-    }
-  }
-}

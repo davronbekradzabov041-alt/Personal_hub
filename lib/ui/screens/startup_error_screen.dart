@@ -2,6 +2,7 @@
 library startup_error_screen;
 
 import 'package:flutter/material.dart';
+import '../../core/design/design_system.dart';
 
 /// Показывается, когда инициализация приложения не удалась.
 ///
@@ -34,7 +35,10 @@ class StartupErrorScreen extends StatelessWidget {
         body: SafeArea(
           child: Center(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
+              // Единый адаптивный стандарт отступа экрана (Stage 11):
+              // раньше здесь был литерал 24 — четвёртый разные боковой
+              // отступ в приложении наряду с 16, 20 и 32.
+              padding: AppInsets.screenBody(context),
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 480),
                 child: Column(

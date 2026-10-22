@@ -100,13 +100,13 @@ class _CategoryFormScreenState extends State<CategoryFormScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(_isEditing ? 'Категория' : 'Новая категория')),
       body: ListView(
-        padding: AppInsets.md,
+        padding: AppInsets.screenBody(context),
         children: [
           // Превью: пользователь видит результат до сохранения, а не
           // после — иначе первый заход в список был бы сюрпризом.
           AppComponents.card(
             child: Padding(
-              padding: AppInsets.md,
+              padding: AppInsets.screenBody(context),
               child: Row(
                 children: [
                   Icon(

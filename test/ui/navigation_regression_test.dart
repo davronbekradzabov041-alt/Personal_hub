@@ -437,6 +437,7 @@ void main() {
             AppRoutes.modules,
             AppRoutes.backup,
             AppRoutes.schedule,
+            AppRoutes.accounts,
           ),
           reason: 'ключ ${entry.key} не является именем маршрута ядра',
         );
@@ -447,6 +448,7 @@ void main() {
       expect(AppRoutes.routes.containsKey(AppRoutes.modules), isTrue);
       expect(AppRoutes.routes.containsKey(AppRoutes.schedule), isTrue);
       expect(AppRoutes.routes.containsKey(AppRoutes.backup), isTrue);
+      expect(AppRoutes.routes.containsKey(AppRoutes.accounts), isTrue);
     });
   });
 

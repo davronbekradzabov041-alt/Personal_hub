@@ -107,79 +107,76 @@ class _AgendaItem extends StatelessWidget {
         context: context,
         accentColor: _getEventColor(event, theme),
         onTap: () => onTap(event),
-        child: Padding(
-          padding: AppInsets.cardPadding,
-          child: Row(
-            children: [
-              // Индикатор времени/статуса
-              Container(
-                width: 4,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: isCurrent ? theme.colorScheme.error : _getEventColor(event, theme),
-                  borderRadius: BorderRadius.circular(2),
-                ),
+        child: Row(
+          children: [
+            // Индикатор времени/статуса
+            Container(
+              width: 4,
+              height: 48,
+              decoration: BoxDecoration(
+                color: isCurrent ? theme.colorScheme.error : _getEventColor(event, theme),
+                borderRadius: BorderRadius.circular(2),
               ),
-              SizedBox(width: AppSpacing.space4),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            event.title,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              color: isCurrent ? theme.colorScheme.error : theme.colorScheme.onSurface,
+            ),
+            SizedBox(width: AppSpacing.space4),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          event.title.trim().isEmpty ? 'Без названия' : event.title,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: isCurrent ? theme.colorScheme.error : theme.colorScheme.onSurface,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (isCurrent)
+                        Padding(
+                          padding: EdgeInsets.only(left: AppSpacing.xs),
+                          child: Container(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: AppSpacing.xs,
+                              vertical: 2,
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.error.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(AppRadiiValues.full),
+                            ),
+                            child: Text(
+                              'СЕЙЧАС',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: theme.colorScheme.error,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
                           ),
                         ),
-                        if (isCurrent)
-                          Padding(
-                            padding: EdgeInsets.only(left: AppSpacing.xs),
-                            child: Container(
-                              padding: EdgeInsets.symmetric(
-                                horizontal: AppSpacing.xs,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: theme.colorScheme.error.withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(AppRadiiValues.full),
-                              ),
-                              child: Text(
-                                'СЕЙЧАС',
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  color: theme.colorScheme.error,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
+                    ],
+                  ),
+                  SizedBox(height: AppSpacing.xs),
+                  Text(
+                    '${ScheduleEvent.formatMinutes(event.startMinutes)}–${ScheduleEvent.formatMinutes(event.endMinutes)}'
+                    '${category == null ? '' : '  ·  ${category!.name}'}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
-                    SizedBox(height: AppSpacing.xs),
-                    Text(
-                      '${ScheduleEvent.formatMinutes(event.startMinutes)}–${ScheduleEvent.formatMinutes(event.endMinutes)}'
-                      '${category == null ? '' : '  ·  ${category!.name}'}',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
               ),
-              Icon(
-                Icons.chevron_right,
-                color: theme.colorScheme.outline,
-              ),
-            ],
-          ),
+            ),
+            Icon(
+              Icons.chevron_right,
+              color: theme.colorScheme.outline,
+            ),
+          ],
         ),
       ),
     );

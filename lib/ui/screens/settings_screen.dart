@@ -28,7 +28,7 @@ class SettingsScreen extends StatelessWidget {
         listenable: controller,
         builder: (context, _) {
           return ListView(
-            padding: AppInsets.md,
+            padding: AppInsets.screenBody(context),
             children: [
               AppComponents.sectionHeader(
                 context: context,

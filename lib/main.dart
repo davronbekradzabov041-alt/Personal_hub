@@ -115,10 +115,30 @@ Future<Widget> _bootstrap() async {
       onError: (error, _) => _logError('восстановление состояния модуля', error),
     ).restore(),
   );
-  await ensureBuiltinModulesInstalled(moduleManager, moduleStateRepository);
+
+  // Автоустановка встроенных модулей, которых ещё не было ни разу.
+  //
+  // Сбой установки или включения ОДНОГО встроенного модуля не роняет
+  // запуск (Stage 11): ensureBuiltinModulesInstalled обрабатывает
+  // каждый модуль независимо и возвращает отчёт. Раньше исключение
+  // из enable() летело отсюда наружу, и _bootstrap() показывал
+  // StartupErrorScreen — приложение было неработоспособным из-за
+  // чужой проблемы. Модуль, который не удалось включить, остаётся
+  // установленным и доступен на странице «Модули», где ошибка
+  // показывается снэкбаром.
+  final installReport =
+      await ensureBuiltinModulesInstalled(moduleManager, moduleStateRepository);
+  if (installReport.hasFailures) {
+    _logError(
+      'установка встроенных модулей',
+      StateError(
+        'не удалось установить/включить: ${installReport.failed.join(", ")}',
+      ),
+    );
+  }
 
   // Стартовые записи (восстановление состояний + автоустановка
-  // встроенных модулей) дожидаются до первого кадра: если процесс
+  // встроенных модулей) дожидают до первого кадра: если процесс
   // завершится сразу после запуска, первый запуск модуля не должен
   // потеряться так же, как не должна теряться запись uninstall.
   await statePersistence.flush();

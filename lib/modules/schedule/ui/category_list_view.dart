@@ -200,7 +200,7 @@ class _CategoryListViewState extends State<CategoryListView> {
         }
 
         return ReorderableListView.builder(
-          padding: AppInsets.md,
+          padding: AppInsets.screenBody(context),
           itemCount: categories.length,
           onReorderItem: (oldIndex, newIndex) =>
               _applyOrder(categories, oldIndex, newIndex),

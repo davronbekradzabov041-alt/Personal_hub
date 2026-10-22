@@ -4,7 +4,6 @@ import '../../core/modules/home_section.dart';
 import '../../core/modules/module_manager.dart';
 import '../../core/modules/module_manager_scope.dart';
 import '../../core/modules/module_registry.dart';
-import '../widgets/home/active_modules_canvas.dart';
 
 /// Главный экран Personal Hub — Today Cockpit Foundation.
 ///
@@ -80,20 +79,11 @@ class HomeScreen extends StatelessWidget {
       for (final section in sections)
         SliverToBoxAdapter(child: section.builder(context)),
 
-      // ===== ACTIVE MODULES CANVAS =====
-      const SliverToBoxAdapter(
-        child: Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: AppSpacing.space7,
-            vertical: AppSpacing.space4,
-          ),
-          child: ActiveModulesCanvas(),
-        ),
-      ),
-
-      // Bottom padding for safe area
-      const SliverToBoxAdapter(
-        child: SizedBox(height: AppSpacing.space10),
+      // Просвет под плавающим доком: его высота + нижний отступ +
+      // системный inset + 16 dp. Раньше здесь был просто 64 dp — меньше,
+      // чем реальный док, и последняя карточка уезжала под навигацию.
+      SliverToBoxAdapter(
+        child: SizedBox(height: AppInsets.dockClearance(context).bottom),
       ),
     ];
   }

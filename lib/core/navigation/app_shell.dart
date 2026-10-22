@@ -3,6 +3,7 @@ import 'package:flutter/cupertino.dart';
 import '../../ui/screens/home_screen.dart';
 import '../../ui/screens/modules_screen.dart';
 import '../../modules/schedule/ui/schedule_screen.dart';
+import '../../modules/accounts/ui/accounts_screen.dart';
 import '../design/design_system.dart';
 import 'app_routes.dart';
 
@@ -33,6 +34,14 @@ class _AppShellState extends State<AppShell> {
       icon: Icons.schedule_outlined,
       selectedIcon: Icons.schedule,
       label: 'Расписание',
+      shortLabel: 'График',
+    ),
+    _NavigationDestination(
+      route: AppRoutes.accounts,
+      icon: Icons.account_circle_outlined,
+      selectedIcon: Icons.account_circle,
+      label: 'Аккаунты',
+      shortLabel: 'Профили',
     ),
     _NavigationDestination(
       route: AppRoutes.modules,
@@ -207,6 +216,9 @@ class _AppShellState extends State<AppShell> {
     if (routeName == AppRoutes.schedule) {
       return const ScheduleScreen(moduleId: 'schedule');
     }
+    if (routeName == AppRoutes.accounts) {
+      return const AccountsScreen(moduleId: 'accounts');
+    }
     if (routeName == AppRoutes.modules) return const ModulesScreen();
     return null;
   }
@@ -278,6 +290,8 @@ class _AppShellState extends State<AppShell> {
       case 1:
         return const ScheduleScreen(moduleId: 'schedule');
       case 2:
+        return const AccountsScreen(moduleId: 'accounts');
+      case 3:
         return const ModulesScreen();
       default:
         return const HomeScreen();
@@ -293,12 +307,26 @@ class _NavigationDestination {
   final IconData selectedIcon;
   final String label;
 
+  /// Короткая подпись для компактного дока, где полная не помещается.
+  ///
+  /// На телефоне 360 dp на раздел приходится ~90 dp минус внутренние
+  /// отступы (~58 dp текста): «Расписание» и «Аккаунты» при масштабе
+  /// текста 1.3 туда не влезают и переносились по слогам. В рельсе
+  /// (≥600 dp) ширины хватает, поэтому там показывается [label].
+  /// Идентификатор маршрута при этом не меняется.
+  final String? shortLabel;
+
   const _NavigationDestination({
     required this.route,
     required this.icon,
     required this.selectedIcon,
     required this.label,
+    this.shortLabel,
   });
+
+  String labelFor(bool compact) => compact && shortLabel != null
+      ? shortLabel!
+      : label;
 }
 
 /// Top Context Bar for compact layout.
@@ -417,6 +445,12 @@ class _FloatingIslandDock extends StatelessWidget {
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
+                      // stretch, а не center по умолчанию: иначе Column
+                      // расширяется под самую широкую подпись (66 dp против
+                      // 58 dp доступных) и ряд переполняется на 8 px.
+                      // При stretch дети получают реальную ширину, а
+                      // FittedBox ниже масштабирует текст по ней.
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Icon(
                           isSelected ? dest.selectedIcon : dest.icon,
@@ -426,15 +460,26 @@ class _FloatingIslandDock extends StatelessWidget {
                               : theme.colorScheme.onSurfaceVariant,
                         ),
                         SizedBox(height: AppSpacing.xs),
-                        Text(
-                          dest.label,
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: isSelected
-                                ? theme.colorScheme.onPrimaryContainer
-                                : theme.colorScheme.onSurfaceVariant,
-                            fontWeight: isSelected
-                                ? FontWeight.w600
-                                : FontWeight.w400,
+                        // Подпись — одна строка. Раньше `labelSmall` без
+                        // maxLines переносил «Расписание»/«Аккаунты» по
+                        // слогам, и ряд подписей вылезал за пределы
+                        // контейнера. Теперь размер из темы (labelLarge,
+                        // 11–12 sp) плюс FittedBox: если шиены не хватит
+                        // даже короткой подписи, текст масштабируется,
+                        // а не ломает вёрстку.
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            dest.labelFor(true),
+                            maxLines: 1,
+                            style: theme.textTheme.labelLarge?.copyWith(
+                              color: isSelected
+                                  ? theme.colorScheme.onPrimaryContainer
+                                  : theme.colorScheme.onSurfaceVariant,
+                              fontWeight: isSelected
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
+                            ),
                           ),
                         ),
                       ],

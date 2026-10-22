@@ -41,12 +41,11 @@ class InMemoryModuleCatalog {
       installManifestJson: _calendarLiteV1,
       latestManifestJson: _calendarLiteV1,
     ),
-    // Специально включён: id 'example' уже занят настоящим встроенным
-    // ExampleModule (зарегистрирован при старте, Этап 10). Попытка
-    // установить эту запись из каталога должна быть отклонена —
-    // наглядная демонстрация проверки "дублирующийся moduleId"
-    // (Этап 11) на реалистичном сценарии, а не только в тестах на
-    // синтетических данных.
+    // Специально включён: id 'example' — зарезервированное имя сценария
+    // «дублирующийся moduleId» (Этап 11). Установка записи должна быть
+    // отклонена, если этот id уже кем-то занят; capability важна и
+    // проверяется в module_store_test собственной регистрацией модуля
+    // с этим id.
     ModuleCatalogEntry(
       id: 'example',
       installManifestJson: _exampleCatalogManifest,

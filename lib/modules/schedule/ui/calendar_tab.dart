@@ -95,7 +95,7 @@ class _CalendarTabState extends State<CalendarTab> {
               }
               final resolver = CategoryResolver.of(_categories);
               return ListView(
-                padding: AppInsets.md,
+                padding: AppInsets.screenBody(context),
                 children: events
                     .map((e) => EventTile(
                           event: e,
