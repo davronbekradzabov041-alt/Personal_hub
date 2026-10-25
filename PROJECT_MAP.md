@@ -1,196 +1,118 @@
 # PROJECT_MAP.md — Personal Hub
 
-Карта проекта по фактическому состоянию рабочего дерева.
-
-Состояние коммитов: HEAD `d453d52` от 2026-09-23. Module Platform,
-Import/Export, Backup и HomeSection существуют в рабочем дереве и
-**не закоммичены**. Подробная история по этапам — в `README.md`,
-краткая — в `CHANGELOG.md`.
+Карта проекта Personal Hub. Описано только то, что подтверждается кодом в рабочем дереве. Ветка: `master`, HEAD `a82e428` (локальный коммит, не отправлен в remote). Рабочее дерево содержит незакоммиченные изменения (см. `git status`).
 
 ## lib/
 
-Весь код приложения.
-
 ### lib/main.dart
-Точка входа. Порядок инициализации: Isar → регистрация модулей →
-настройки → поиск → `ModuleManager` → восстановление состояния из
-Isar → автоустановка встроенных модулей при первом запуске. Любая
-ошибка на этом этапе до `runApp()` показывается отдельным экраном
-(`StartupErrorScreen`) с идентификаторами для воспроизведения.
+Точка входа приложения. Последовательность инициализации: Isar → репозиторий настроек → `ModuleManager` → восстановление состояния модулей из Isar → `runApp()`. При сбое инициализации до `runApp()` показывается `StartupErrorScreen` с идентификаторами для воспроизведения.
 
 ### lib/app.dart
-Корневой виджет `PersonalHubApp` — тема, именованные маршруты,
-`AppSettingsScope`/`SearchScope`/`ModuleManagerScope`/
-`ModuleStatePersistenceScope`/`BackupServicesScope`.
+`PersonalHubApp` — корневой виджет приложения. Собирает scope: `AppSettingsScope`, `SearchScope`, `ModuleManagerScope`, `ModuleStatePersistenceScope`, `BackupServicesScope`.
 
 ### lib/core/
-Ядро приложения. Не импортирует конкретные функциональные модули
-(см. границу composition root ниже).
 
-- **core/database/** — Isar: инициализация (`isar_service.dart`),
-  модели ядра (`models/app_settings.dart`, `models/core_test_item.dart`,
-  а также общие `ModuleDataRow`, `ModuleStateRecord`), репозитории
-  поверх них.
-- **core/settings/** — `AppSettingsController` + `Scope`
-  (тема, единственная пользовательская настройка сейчас).
-- **core/search/** — `GlobalSearchService`, контракт
-  `SearchProvider`, `SearchResult`, `SearchScope`.
-- **core/navigation/** — `app_routes.dart` (таблица маршрутов:
-  `/`, `/settings`, `/search`, `/modules`, экран backup) и
-  `app_shell.dart` (`AppShell` — адаптивная навигация, в т.ч.
-  `NavigationType.drawer`, `_TopContextBar`, `_FloatingIslandDock`,
-  `_RailSecondaryAction`). `AppShell` — источник истины для
-  текущей навигации.
-- **core/design/** — дизайн-система (Stage 3.6D): полная тема
-  (`app_theme.dart` — источник `ThemeData`, цвета, типографика,
-  отступы, анимации, breakpoints, компоненты
-  `app_components.dart`; наружу отдаётся через `design_system.dart`).
-- **core/theme/** — `AppTheme`-фасад, который приложение использует
-  для смены темы; сам переадресует в `core/design/app_theme.dart`.
-- **core/constants/** — строковые константы UI.
-- **core/modules/** — вся система модулей:
-  - контракт (`module.dart`, `module_api.dart`,
-    `module_manifest.dart`, `module_permission.dart`,
-    `module_state.dart`);
-  - реестр (`module_registry.dart`) и точка подключения модулей
-    (`module_bootstrap.dart`);
-  - оркестратор жизненного цикла (`module_manager.dart`,
-    `module_manager_scope.dart`, `module_install_result.dart`,
-    `module_lifecycle_error.dart`) с проверками безопасности
-    (формат версии, apiVersion, зависимости, циклы) и откатом
-    неудачной установки;
-  - хранение (`module_storage.dart`,
-    `module_storage_isar.dart`) и персистентность состояния
-    (`module_state_store.dart`, `module_state_persistence.dart`,
-    `module_state_restorer.dart`,
-    `module_state_persistence_scope.dart`);
-  - автоустановка встроенных модулей
-    (`builtin_module_installer.dart`);
-  - контракт секции главного экрана (`home_section.dart` —
-    `HomeSection`: `moduleId`, `order`, `builder`, `onRefresh`);
-  - **core/modules/external/** — формат и приём внешнего модуля:
-    парсинг (`manifest_parser.dart`), валидация
-    (`manifest_validator.dart`), результат импорта
-    (`module_package.dart`, `module_import_result.dart`), мост к
-    `Module` без выполнения чужого кода
-    (`external_module_adapter.dart`), временный каталог
-    «доступных» модулей (`in_memory_module_catalog.dart`).
-- **core/modules/platform/** — Module Platform, изолированный слой
-  ввода-вывода пакетов `.phm` (барrel `platform.dart`; по
-  документации библиотеки не зависит от `ModuleManager`/
-  `ModuleRegistry`): package I/O (`package_reader.dart`,
-    `package_writer.dart`, `package_content.dart`), security guard
-    (`package_security_guard.dart`), песочница модуля
-    (`module_sandbox.dart`), сериализация хранилища
-    (`module_storage_serializer.dart`), импорт/экспорт
-    (`module_importer.dart`, `module_exporter.dart`) и исключения
-    (`importer_exceptions.dart`, `package_exceptions.dart`,
-    `sandbox_exceptions.dart`, `serializer_exceptions.dart`).
-- **core/backup/** — Backup (Stage 6B/6C/6D, barrel `backup.dart`):
-  манифест (`backup_manifest.dart`), security guard
-    (`backup_security_guard.dart`), запись/чтение архивов
-    (`backup_writer.dart`, `backup_reader.dart`), опции
-    (`backup_options.dart`), атомарная запись
-    (`atomic_file_writer.dart`), глобальный бэкап `.pbk`
-    (`global_backup_manager.dart`), бэкап/восстановление модуля
-    `.pmb` (`module_backup.dart` и `module_backup_*.dart`),
-    исключения (`backup_exceptions.dart`).
-  **Глобальный restore `.pbk` не реализован** — есть только создание
-  и чтение для предпросмотра; рабочий restore — только для `.pmb`.
-
-### Граница composition root (Core → Modules)
-Ядро не импортирует `lib/modules/**`. Единственные разрешённые
-исключения, зафиксированные в
-`test/ui/home_architecture_boundary_test.dart`:
+Ядро приложения. Не импортирует конкретные функциональные модули (`lib/modules/**`) за исключением трёх точек composition root, проверяемых тестом `test/ui/home_architecture_boundary_test.dart`:
 - `lib/core/modules/module_bootstrap.dart`
 - `lib/core/navigation/app_routes.dart`
 - `lib/core/navigation/app_shell.dart`
 
-### lib/modules/
-Сами модули — каждый в своей подпапке, ядром не импортируются.
+#### core/database/
+Isar: `isar_service.dart`, модели (`models/app_settings.dart`, `models/core_test_item.dart`, `models/module_data_row.dart`, `models/module_state_record.dart` и др.).
 
-- **modules/example/** — демонстрационный модуль (доказывает, что
-  механизм регистрации и жизненного цикла работает).
-- **modules/schedule/** — Schedule, первый полноценный
-  функциональный модуль: события по дням
-  (`models/schedule_event.dart`), CRUD-репозиторий поверх
-  `ModuleStorage` (`schedule_repository.dart`), поиск
-  (`schedule_search_provider.dart`), UI экрана (вкладки
-  «Сегодня»/«Календарь», форма создания/редактирования, список)
-  и **собственная секция главного экрана**
-  (`ui/home/schedule_home_section.dart`, `ui/home/today_hero.dart`,
-  `ui/home/timeline_strip.dart`, `ui/home/upcoming_agenda.dart`).
-- **modules/README.md** — правило зависимостей и список модулей.
+#### core/settings/
+`AppSettingsController` + Scope — глобальные настройки приложения.
+
+#### core/search/
+`GlobalSearchService`, `SearchProvider`, `SearchResult`, `SearchScope`. Модули регистрируют своих провайдеров поиска через `ModuleApi` при `onEnable` и снимают при `onDisable`.
+
+#### core/navigation/
+- `app_routes.dart` — таблица маршрутов: `/` (главный экран), `/settings`, `/search`, `/modules` (Module Store), экран backup.
+- `app_shell.dart` — `AppShell`: адаптивная навигация (`NavigationType.drawer`, `_TopContextBar`, `_FloatingIslandDock`, `_RailSecondaryAction`).
+
+#### core/design/
+Дизайн-система: `app_theme.dart` (`ThemeData`, цветовая схема, типографика), `app_colors.dart`, `app_spacing.dart`, `app_insets.dart`, `app_breakpoints.dart`, `app_components.dart` (карточки, пустые состояния, кнопки, SnackBar, диалоги), `design_system.dart`.
+
+#### core/theme/
+`AppTheme` и связанные тематические сущности.
+
+#### core/constants/
+UI-константы.
+
+#### core/modules/
+Система модулей (composition root, не знает о конкретных функциональных модулях):
+- `module.dart` — контракт `Module`: `manifest`, `id`/`title`, `order`, `buildPage()`, хуки `onInstall`/`onEnable`/`onDisable`/`onUninstall`, `homeSections`.
+- `module_api.dart` — `ModuleApi`: изолированное хранилище (`ModuleStorage`) и регистрация/снятие `SearchProvider`; реализация `_ModuleApiImpl` внутри `ModuleManager`.
+- `module_manifest.dart` — `ModuleManifest` (id, name, version, apiVersion, author, description, schemaVersion, permissions, dependencies, dataMigrations).
+- `module_permission.dart` — `ModulePermission` (например, `coreSearch`).
+- `module_state.dart` — `ModuleState` (`installed`/`enabled`/`disabled`/`uninstalled`).
+- `module_registry.dart` — `ModuleRegistry`: регистрация/замена модулей.
+- `module_bootstrap.dart` — начальная загрузка встроенных модулей.
+- `module_manager.dart` — `ModuleManager`: `install()`/`tryInstall()` → `ModuleInstallResult`, `enable()`, `disable()`, `uninstall()`, `update()`, `isInstalled()`, `isEnabled()`, `stateOf()`, `apiFor()`, `adoptRestoredState()`. Проверки версии, `apiVersion`, зависимостей и циклов (`_dependencyCycles`), откат при неудачной установке (`_rollbackFailedInstall`).
+- `module_manager_scope.dart` — `ModuleManagerScope`: доступ к менеджеру и хранилищу из дерева виджетов.
+- `module_install_result.dart`, `module_lifecycle_error.dart` — результаты и ошибки жизненного цикла.
+- `module_storage.dart` — контракт `ModuleStorage` (`getString`/`setString`/`remove`/`keys`), изоляция по ключам модуля.
+- `module_storage_isar.dart` — Isar-реализация `ModuleStorage` (общая коллекция, изоляция по `moduleId`).
+- `module_state_store.dart` — `ModuleStateStore` (`loadAll`/`load`/`save`/`delete` снимков состояния).
+- `module_state_persistence.dart` — `ModuleStatePersistence`: синхронизация состояний с Isar (`flush()`, `runAndFlush()`).
+- `module_state_restorer.dart` — `ModuleStateRestorer`: восстановление состояний при запуске.
+- `module_state_persistence_scope.dart` — доступ к персистентности из дерева виджетов.
+- `builtin_module_installer.dart` — `ensureBuiltinModulesInstalled()`: установка/перевключение встроенных модулей. Явно отключённые пользователем модули (`state == disabled`) не активируются повторно.
+- `home_section.dart` — `HomeSection` (`moduleId`, `order`, `builder`, `onRefresh?`). Контракт секции главного экрана.
+
+#### core/modules/external/
+Формат внешнего модуля `.phm`: `manifest_parser.dart`, `manifest_validator.dart`, `module_package.dart`, `module_import_result.dart`, `external_module_adapter.dart` (манифест → `Module` без выполнения чужого кода), `in_memory_module_catalog.dart`.
+
+#### core/modules/platform/
+Module Platform — изолированный слой ввода-вывода для пакетов модулей (не зависит от `ModuleManager`/`ModuleRegistry`): `package_reader.dart`, `package_writer.dart`, `package_content.dart`, `package_security_guard.dart` (`validateArchive()`), `module_sandbox.dart` (`validateModuleId()`), `module_storage_serializer.dart`, `module_importer.dart` (`importFromBytes()`), `module_exporter.dart` (`export()`), исключения (`importer_exceptions.dart`, `package_exceptions.dart`, `sandbox_exceptions.dart`, `serializer_exceptions.dart`).
+
+#### core/backup/
+Ядро резервного копирования (барrel `backup.dart`): `backup_manifest.dart`, `backup_exceptions.dart`, `backup_options.dart`, `backup_reader.dart`, `backup_writer.dart`, `atomic_file_writer.dart`, `global_backup_manager.dart` (глобальный архив `.pbk`), `module_backup.dart`, `module_backup_manifest.dart`, `module_backup_options.dart`, `module_backup_reader.dart`, `module_backup_writer.dart`.
+**Ограничение:** глобальный архив `.pbk` можно создать и просмотреть, но восстановление глобального бэкапа в состояние приложения **не реализовано** (`GlobalBackupManager` не имеет операций restore). Работает только маршрут `.pmb` (бэкап одного модуля) с отказом при неудаче.
+
+### lib/modules/
+Функциональные модули (каждый изолирован: свои репозитории, модели, UI, собственное хранилище через `ModuleStorage` и `ModuleApi`):
+
+#### modules/accounts/
+- Модели: `models/account.dart` (`Account`, `AccountType`), `models/category.dart` (`Category`), `models/game_profile.dart` (`GameProfile`).
+- Репозитории: `account_repository.dart` (`AccountRepository`, исключение `AccountRepositoryException`), `category_repository.dart`, `game_repository.dart` (`GameRepository`, `deleteByAccount(accountId)`).
+- Поиск: `accounts_search_provider.dart` (`AccountsSearchProvider`, регистрируется при `onEnable`, снимается при `onDisable`/`onUninstall`).
+- `accounts_module.dart` — `AccountsModule` (id `accounts`, манифест `schemaVersion: 1`, `homeSections`, `buildPage` → `AccountsScreen`).
+- UI: `ui/accounts_screen.dart`, `ui/account_list_screen.dart`, `ui/account_form_screen.dart`, `ui/category_list_screen.dart`, `ui/category_form_screen.dart`, `ui/game_list_screen.dart`, `ui/game_form_screen.dart`, `ui/visuals`, `ui/home/accounts_home_section.dart`.
+
+#### modules/schedule/
+- Модели: `models/schedule_event.dart`, `models/category.dart`.
+- Репозитории и поиск: `schedule_repository.dart`, `schedule_category_repository.dart`, `schedule_search_provider.dart`.
+- `schedule_module.dart` — `ScheduleModule` (`homeSections`).
+- UI: `ui/home/schedule_home_section.dart`, `ui/home/today_hero.dart`, `ui/home/timeline_strip.dart`, `ui/home/upcoming_agenda.dart`, `ui/today_tab.dart`, `ui/calendar_tab.dart`, экраны категорий и событий, визуализации.
 
 ### lib/ui/
-Общие экраны и виджеты ядра, не завязанные на конкретный модуль.
-
-- **ui/screens/** — `home_screen.dart` (композиция секций включённых
-  модулей), `settings_screen.dart`, `search_screen.dart`,
-  `modules_screen.dart` (Module Store), `backup_screen.dart`,
-  `startup_error_screen.dart`.
-- **ui/backup/** — слой доступа UI к backup, не знающий core:
-  контракт операций (`backup_gateway.dart`), адаптер core-менеджеров
-  (`core_backup_gateway.dart`), состояние операций
-  (`backup_operation_controller.dart`), выбор файла
-  (`backup_file_service.dart`), передача сервисов
-  (`backup_services_scope.dart`), читаемые сообщения об ошибках
-  (`backup_error_presenter.dart`).
-- **ui/widgets/** — `EmptyState`; **ui/widgets/home/** —
-  `active_modules_canvas.dart` (общий, не принадлежит Schedule);
-  **ui/widgets/module_store/** — секции Установленные/Доступные/
-  Обновления, карточка модуля, общий обработчик ошибок жизненного
-  цикла; **ui/widgets/backup/** — секции глобального бэкапа, бэкапа
-  модуля и restore, диалог подтверждения, баннер операции.
-
-Отдельного виджета бокового меню в `ui/widgets/` нет: навигацию
-строит `AppShell`.
+Экраны и виджеты приложения:
+- `ui/screens/` — `home_screen.dart` (собирает `homeSections` включённых модулей), `modules_screen.dart` (Module Store: «Установленные» / «Доступные» / «Обновления»), `search_screen.dart`, `settings_screen.dart`, `backup_screen.dart`, `startup_error_screen.dart`.
+- `ui/backup/` — UI бэкапа без прямой зависимости от core: `backup_gateway.dart`, `core_backup_gateway.dart`, `backup_operation_controller.dart`, `backup_file_service.dart` (`file_picker`), `backup_services_scope.dart`, `backup_error_presenter.dart`.
+- `ui/widgets/` — `empty_state.dart`.
+- `ui/widgets/home/` — `active_modules_canvas.dart` (не принадлежит Schedule, находится в `ui/`).
+- `ui/widgets/module_store/` — секции модульного store, `module_card.dart`, `module_action_runner.dart`, `update_section.dart`.
+- `ui/widgets/backup/` — секции глобального бэкапа, бэкапа модуля и restore, диалог подтверждения, баннер операции.
 
 ## test/
-
-Тесты зеркалят структуру `lib/`.
-
-- `test/core/modules/` — `module_state_persistence_test.dart`,
-  `security_audit_test.dart`; `test/core/modules/external/` —
-  `module_import_test.dart`, `module_store_test.dart`.
-- `test/core/modules/platform/` — песочница, security guard,
-  сериализация, чтение/запись пакета, импорт/экспорт, регрессии
-  дубликатов манифеста и диагностические тесты.
-- `test/core/backup/` — манифест, запись, security-регрессии,
-  конкурентное и оверрайд-состояние при restore, интеграционный
-  тест, диагностика.
-- `test/modules/example/`, `test/modules/schedule/` — чек-лист
-  «Проверить» на реальных модулях, включая
-  `schedule_home_section_test.dart` и
-  `event_form_delete_dialog_test.dart`.
-- `test/ui/` — контракт и границы Home (`home_section_contract_test.dart`,
-  `home_architecture_boundary_test.dart`), навигация
-  (`navigation_regression_test.dart`), Module Store
-  (`module_store_persistence_test.dart`,
-  `module_store_failed_install_test.dart`,
-  `module_import_persistence_test.dart`), backup UI
-  (`backup_screen_test.dart`, `backup_restore_error_reporting_test.dart`,
-  `restore_section_foreign_module_test.dart`,
-  `backup_ui_backend_smoke_test.dart`).
+Тесты, зеркалирующие структуру `lib/`:
+- `test/core/modules/` — тесты установщика, миграций, состояния модулей, реестра, жизненного цикла.
+- `test/modules/accounts/` — тесты репозитория (CRUD, каскадное удаление, обработка ошибок), жизненного цикла, поиска, UI.
+- `test/modules/schedule/` — тесты секции главного экрана, миграций, категорий, событий, форм.
+- `test/ui/` — регрессионные тесты макета, навигации, home-секции, модульного store, backup UI.
 
 ## docs/
+- `docs/external-module-format.md` — формат внешнего модуля `.phm` (`manifest.json` + `assets/` + `data/` + `README.md`).
+- `docs/external-module-example/` — пример пакета модуля.
 
-Документация формата и примеры, не входящие в код приложения.
+## Документация проекта
+- `README.md` — описание проекта, стек, архитектура, инструкции по запуску и сборке, известные ограничения.
+- `CHANGELOG.md` — история изменений.
+- `pubspec.yaml` — зависимости Flutter/Dart (`isar` 3.1.0+1, `path_provider`, `google_fonts`, `path`, `meta`, `file_picker`, `crypto`, `build_runner`/`isar_generator` в dev).
+- `.gitignore`, `.gitattributes` — игнорируемые артефакты сборки (`build/`, `.dart_tool/`, Android-вывод, `.kilo/` и т.д.) и настройки EOL.
 
-- `external-module-format.md` — формат `manifest.json` внешнего
-  модуля, обязательные поля, что и где проверяется. Синхронизирован
-  с `ManifestValidator`/`ModuleManager`.
-- `external-module-example/` — пример пакета внешнего модуля
-  (manifest.json + assets/ + data/ + README.md), иллюстрирующий
-  формат — не устанавливается и не выполняется.
-
-## Корень проекта
-
-- `README.md` — раздел «Актуальное состояние проекта» плюс
-  историческая хроника по этапам 1–14.
-- `CHANGELOG.md` — краткая история по этапам.
-- `PROJECT_MAP.md` — этот документ.
-- `pubspec.yaml` — зависимости (Flutter, Isar 3.1.0+1,
-  path_provider, google_fonts, path, meta, file_picker, crypto,
-  build_runner/isar_generator для кодогенерации).
-- `.gitignore`, `.gitattributes` — правила игнорирования и EOL-политика.
+## Известные ограничения (код не реализует)
+- Восстановление глобального архива `.pbk` отсутствует (только `.pmb`).
+- `ModuleStorage` не обеспечивает транзакцию над несколькими ключами: частичный сбой при каскадном удалении возможен (часть игр может быть уже удалена, аккаунт не удаляется).
+- Отображение на реальном устройстве не проверялось; проверялись только тесты и статический анализ.

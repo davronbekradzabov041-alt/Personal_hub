@@ -3,7 +3,10 @@ library account_repository_test;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_hub/modules/accounts/account_repository.dart';
+import 'package:personal_hub/modules/accounts/category_repository.dart';
+import 'package:personal_hub/modules/accounts/game_repository.dart';
 import 'package:personal_hub/modules/accounts/models/account.dart';
+import 'package:personal_hub/modules/accounts/models/game_profile.dart';
 import 'test_storage.dart';
 
 void main() {
@@ -319,4 +322,137 @@ void main() {
       expect(await repo2.count(), 0);
     });
   });
+
+  group('AccountRepository каскадное удаление с играми', () {
+    late InMemoryModuleStorage storage;
+    late AccountRepository accountRepo;
+    late CategoryRepository categoryRepo;
+    late GameRepository gameRepo;
+
+    setUp(() {
+      storage = InMemoryModuleStorage();
+      accountRepo = AccountRepository(storage);
+      categoryRepo = CategoryRepository(storage);
+      gameRepo = GameRepository(storage, accountRepo, categoryRepo);
+    });
+
+    test('delete удаляет аккаунт и все его игры', () async {
+      final a = await accountRepo.create(
+        name: 'A',
+        type: AccountType.steam,
+        iconKey: 'steam',
+        colorValue: 0xFF1F2438,
+        note: '',
+      );
+      await gameRepo.create(
+        accountId: a.id,
+        title: 'G1',
+        platform: GamePlatform.steam,
+        status: GameStatus.backlog,
+        playtimeMinutes: 0,
+        categoryIds: const [],
+        note: '',
+      );
+      await gameRepo.create(
+        accountId: a.id,
+        title: 'G2',
+        platform: GamePlatform.steam,
+        status: GameStatus.playing,
+        playtimeMinutes: 5,
+        categoryIds: const [],
+        note: '',
+      );
+
+      await accountRepo.delete(a.id);
+
+      expect(await accountRepo.getById(a.id), isNull);
+      expect(await gameRepo.getByAccount(a.id), isEmpty);
+    });
+
+    test('игры других аккаунтов и категории сохраняются', () async {
+      final a1 = await accountRepo.create(
+        name: 'A1',
+        type: AccountType.steam,
+        iconKey: 'steam',
+        colorValue: 0xFF1F2438,
+        note: '',
+      );
+      final a2 = await accountRepo.create(
+        name: 'A2',
+        type: AccountType.epicGames,
+        iconKey: 'epic',
+        colorValue: 0xFF2F3448,
+        note: '',
+      );
+      final c = await categoryRepo.create(
+        name: 'RPG',
+        iconKey: 'rpg',
+        colorValue: 0xFF3F4F5F,
+      );
+      await gameRepo.create(
+        accountId: a1.id,
+        title: 'G1',
+        platform: GamePlatform.steam,
+        status: GameStatus.backlog,
+        playtimeMinutes: 0,
+        categoryIds: [c.id],
+        note: '',
+      );
+      await gameRepo.create(
+        accountId: a2.id,
+        title: 'G2',
+        platform: GamePlatform.epicGames,
+        status: GameStatus.playing,
+        playtimeMinutes: 5,
+        categoryIds: [c.id],
+        note: '',
+      );
+
+      await accountRepo.delete(a1.id);
+
+      expect(await accountRepo.getById(a1.id), isNull);
+      expect((await gameRepo.getByAccount(a1.id)).isEmpty, true);
+      expect((await gameRepo.getByAccount(a2.id)).length, 1);
+      expect(await categoryRepo.getById(c.id), isNotNull);
+    });
+
+    test('ошибка удаления игр не удаляет аккаунт', () async {
+      final a = await accountRepo.create(
+        name: 'A',
+        type: AccountType.steam,
+        iconKey: 'steam',
+        colorValue: 0xFF1F2438,
+        note: '',
+      );
+      await gameRepo.create(
+        accountId: a.id,
+        title: 'G1',
+        platform: GamePlatform.steam,
+        status: GameStatus.backlog,
+        playtimeMinutes: 0,
+        categoryIds: const [],
+        note: '',
+      );
+
+      await expectLater(
+        accountRepo.delete(
+          a.id,
+          gameRepository: _ThrowingGameRepo(storage, accountRepo, categoryRepo),
+        ),
+        throwsA(isA<AccountRepositoryException>()),
+      );
+
+      expect(await accountRepo.getById(a.id), isNotNull);
+      expect(await accountRepo.count(), 1);
+    });
+  });
+}
+
+class _ThrowingGameRepo extends GameRepository {
+  _ThrowingGameRepo(super.storage, super.accountRepository, super.categoryRepository);
+
+  @override
+  Future<void> deleteByAccount(String accountId) async {
+    throw GameRepositoryException('boom');
+  }
 }

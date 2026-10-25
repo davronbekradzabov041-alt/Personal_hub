@@ -18,7 +18,7 @@ import 'ui/home/accounts_home_section.dart';
 class AccountsModule extends Module {
   static const ModuleManifest _manifest = ModuleManifest(
     id: 'accounts',
-    name: 'РђРєРєР°СѓРЅС‚С‹',
+    name: 'Аккаунты',
     version: '0.2.0',
     apiVersion: kCoreModuleApiVersion,
     author: 'Personal Hub',

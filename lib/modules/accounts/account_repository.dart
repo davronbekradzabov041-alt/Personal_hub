@@ -2,9 +2,11 @@ import 'dart:convert';
 
 import '../../core/modules/module_storage.dart';
 import 'models/account.dart';
+import 'category_repository.dart';
+import 'game_repository.dart';
 import 'uuid.dart';
 
-/// Исключения репозитория аккаунтов.
+/// РСЃРєР»СЋС‡РµРЅРёСЏ СЂРµРїРѕР·РёС‚РѕСЂРёСЏ аккаунтРѕРІ.
 class AccountRepositoryException implements Exception {
   AccountRepositoryException(this.reason);
 
@@ -14,10 +16,10 @@ class AccountRepositoryException implements Exception {
   String toString() => reason;
 }
 
-/// Хранилище аккаунтов.
+/// РҐСЂР°РЅРёР»РёС‰Рµ аккаунтРѕРІ.
 ///
-/// Поверх ModuleStorage — ключи `account:<uuid>`.
-/// Не кэширует между вызовами, каждый запрос читает хранилище.
+/// РџРѕРІРµСЂС… ModuleStorage вЂ” РєР»СЋС‡Рё `account:<uuid>`.
+/// РќРµ РєСЌС€РёСЂСѓРµС‚ РјРµР¶РґСѓ РІС‹Р·РѕРІР°РјРё, РєР°Р¶РґС‹Р№ Р·Р°РїСЂРѕСЃ С‡РёС‚Р°РµС‚ С…СЂР°РЅРёР»РёС‰Рµ.
 class AccountRepository {
   AccountRepository(
     this._storage, {
@@ -29,7 +31,7 @@ class AccountRepository {
 
   static const String keyPrefix = 'account:';
 
-  /// Все аккаунты в порядке создания (createdAt).
+  /// Р’СЃРµ аккаунтС‹ РІ РїРѕСЂСЏРґРєРµ СЃРѕР·РґР°РЅРёСЏ (createdAt).
   Future<List<Account>> getAll() async {
     final keys = await _storage.keys();
     final accountKeys = keys.where((k) => k.startsWith(keyPrefix));
@@ -46,15 +48,15 @@ class AccountRepository {
     return accounts;
   }
 
-  /// Аккаунт по id; null, если нет.
+  /// РђРєРєР°СѓРЅС‚ РїРѕ id; null, РµСЃР»Рё РЅРµС‚.
   Future<Account?> getById(String id) async {
     final raw = await _storage.getString(Account.storageKey(id));
     return _decode(raw, fallbackId: id);
   }
 
-  /// Создаёт аккаунт.
+  /// РЎРѕР·РґР°С‘С‚ аккаунт.
   ///
-  /// Бросает [AccountRepositoryException] на пустом имени.
+  /// Бросает [AccountRepositoryException] РЅР° РїСѓСЃС‚РѕРј РёРјРµРЅРё.
   Future<Account> create({
     required String name,
     required AccountType type,
@@ -90,9 +92,9 @@ class AccountRepository {
     }
   }
 
-  /// Обновляет аккаунт.
+  /// РћР±РЅРѕРІР»СЏРµС‚ аккаунт.
   ///
-  /// [createdAt] не меняется. Бросает на пустом имени, дубле имени, несуществующем id.
+  /// [createdAt] РЅРµ РјРµРЅСЏРµС‚СЃСЏ. Бросает РЅР° РїСѓСЃС‚РѕРј РёРјРµРЅРё, РґСѓР±Р»Рµ РёРјРµРЅРё, РЅРµСЃСѓС‰РµСЃС‚РІСѓСЋС‰РµРј id.
   Future<Account> update({
     required String id,
     required String name,
@@ -134,24 +136,35 @@ class AccountRepository {
 
   /// Удаляет аккаунт и все его игры.
   ///
-  /// Порядок: сначала игры (разрываем ссылки), потом сам аккаунт.
-  /// Бросает, если аккаунта нет.
-  Future<void> delete(String id) async {
+  /// Сначала удаляются связанные игры через [GameRepository.deleteByAccount],
+  /// затем сам аккаунт. При сбое удаления игр аккаунт не удаляется.
+  ///
+  /// Ограничение: ModuleStorage не обеспечивает транзакцию над несколькими
+  /// ключами, поэтому при частичном сбое часть игр может быть уже удалена.
+  Future<void> delete(String id, {GameRepository? gameRepository}) async {
     final current = await getById(id);
     if (current == null) {
       throw AccountRepositoryException('аккаунт «$id» не найден');
     }
 
+    final repo =
+        gameRepository ?? GameRepository(_storage, this, CategoryRepository(_storage));
+    try {
+      await repo.deleteByAccount(id);
+    } catch (e) {
+      throw AccountRepositoryException(e.toString());
+    }
+
     await _storage.remove(Account.storageKey(id));
   }
 
-  /// Количество аккаунтов.
+  /// РљРѕР»РёС‡РµСЃС‚РІРѕ аккаунтРѕРІ.
   Future<int> count() async {
     final keys = await _storage.keys();
     return keys.where((k) => k.startsWith(keyPrefix)).length;
   }
 
-  // --- Внутреннее ---
+  // --- Р’РЅСѓС‚СЂРµРЅРЅРµРµ ---
 
   Future<void> _write(Account account) {
     return _storage.setString(
@@ -182,7 +195,7 @@ class AccountRepository {
   static String _requireIcon(String iconKey) {
     final trimmed = iconKey.trim();
     if (trimmed.isEmpty) {
-      throw AccountRepositoryException('иконка аккаунта не может быть пустой');
+      throw AccountRepositoryException('РёРєРѕРЅРєР° аккаунтР° РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ РїСѓСЃС‚РѕР№');
     }
     return trimmed;
   }
@@ -196,7 +209,7 @@ class AccountRepository {
     for (final account in existing) {
       if (account.id == excludingId) continue;
       if (account.name.trim().toLowerCase() != key) continue;
-      throw AccountRepositoryException('аккаунт «${account.name}» уже существует');
+      throw AccountRepositoryException('аккаунт «${account.name}» СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚');
     }
   }
 }

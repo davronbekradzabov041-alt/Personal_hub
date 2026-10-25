@@ -95,8 +95,16 @@ class _AccountListViewState extends State<AccountListView> {
     );
     if (confirmed != true) return;
 
-    await widget.repository.delete(account.id);
-    _reload();
+    try {
+      await widget.repository.delete(account.id);
+      if (mounted) _reload();
+    } on AccountRepositoryException catch (e) {
+      if (!mounted) return;
+      AppComponents.showSnackBar(
+        context: context,
+        message: 'Не удалось удалить аккаунт: ${e.reason}',
+      );
+    }
   }
 
   @override

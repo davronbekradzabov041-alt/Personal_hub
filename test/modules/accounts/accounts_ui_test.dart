@@ -18,6 +18,10 @@ import 'package:personal_hub/core/modules/module_state.dart';
 import 'package:personal_hub/core/modules/module_storage.dart';
 import 'package:personal_hub/core/search/global_search_service.dart';
 import 'package:personal_hub/core/search/search_scope.dart';
+import 'package:personal_hub/modules/accounts/account_repository.dart';
+import 'package:personal_hub/modules/accounts/game_repository.dart';
+import 'package:personal_hub/modules/accounts/models/account.dart';
+import 'package:personal_hub/modules/accounts/ui/account_list_screen.dart';
 import 'package:personal_hub/modules/accounts/accounts_module.dart';
 import 'package:personal_hub/modules/accounts/ui/accounts_screen.dart';
 
@@ -215,6 +219,37 @@ void main() {
 
       expect(find.text('Остаётся'), findsOneWidget);
     });
+
+    testWidgets('ошибка удаления аккаунта показывает сообщение об ошибке', (tester) async {
+      final storage = _InMemoryModuleStorage();
+      final repo = _ThrowingAccountRepository(storage);
+      await repo.create(
+        name: 'Тест',
+        type: AccountType.email,
+        iconKey: 'email',
+        colorValue: 0xFF1F2438,
+        note: '',
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AccountListView(repository: repo),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Тест'), findsOneWidget);
+
+      await tester.tap(find.byIcon(Icons.delete_outline).first);
+      await tester.pumpAndSettle();
+      await tapText(tester, 'Удалить');
+      await tester.pumpAndSettle();
+
+      expect(find.text('Не удалось удалить аккаунт: boom'), findsOneWidget);
+      expect(find.text('Тест'), findsOneWidget);
+    });
   });
 
   group('Вкладка «Категории» через UI', () {
@@ -374,4 +409,13 @@ void main() {
       expect(factory.searchService.providerCount, 1);
     });
   });
+}
+
+class _ThrowingAccountRepository extends AccountRepository {
+  _ThrowingAccountRepository(super.storage);
+
+  @override
+  Future<void> delete(String id, {GameRepository? gameRepository}) async {
+    throw AccountRepositoryException('boom');
+  }
 }
